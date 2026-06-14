@@ -1,0 +1,114 @@
+name: Generate A-Stock Report
+
+on:
+  # 外部 API 触发（手机/网页/脚本）
+  repository_dispatch:
+    types: [daily-report, backtest-report]
+
+  # GitHub 网页手动触发
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: '报告类型'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - backtest
+      backtest_month:
+        description: '回测月份（如 2026-05）'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup tushare token
+        run: |
+          mkdir -p config
+          echo "${{ secrets.TUSHARE_TOKEN }}" > config/.tushare_token
+
+      - name: Generate daily report
+        if: |
+          (github.event_name == 'repository_dispatch' && github.event.action == 'daily-report') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'daily')
+        run: |
+          python main.py
+
+      - name: Generate backtest report
+        if: |
+          (github.event_name == 'repository_dispatch' && github.event.action == 'backtest-report') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'backtest')
+        env:
+          BACKTEST_MONTH: ${{ github.event.client_payload.month || github.event.inputs.backtest_month }}
+        run: |
+          if [ -n "$BACKTEST_MONTH" ]; then
+            python backtest.py --month "$BACKTEST_MONTH"
+          else
+            python backtest.py
+          fi
+
+      - name: List output files
+        run: |
+          echo "Generated files:"
+          find reports/output -type f -name "*.md" 2>/dev/null || true
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a-stock-report-${{ github.run_id }}
+          path: reports/output/
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: report-${{ github.run_id }}
+          name: "A-Stock Report ${{ github.run_id }}"
+          body: |
+            自动生成报告
+
+            - 类型：${{ github.event.action || github.event.inputs.report_type }}
+            - 运行时间：${{ github.run_started_at }}
+
+            报告文件见下方附件。
+          files: reports/output/*.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 可选：邮件通知（需要配置 EMAIL_USERNAME 和 EMAIL_PASSWORD secrets）
+      - name: Send email notification
+        if: env.EMAIL_USERNAME != ''
+        uses: dawidd6/action-send-mail@v3
+        env:
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "A-Stock 报告已生成"
+          to: ${{ secrets.EMAIL_USERNAME }}
+          from: github-actions@example.com
+          body: |
+            报告已生成完成。
+
+            下载地址：https://github.com/${{ github.repository }}/releases/tag/report-${{ github.run_id }}
