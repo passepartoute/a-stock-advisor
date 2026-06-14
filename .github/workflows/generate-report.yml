@@ -22,14 +22,14 @@ on:
         default: ''
         type: string
 
-  jobs:
-    generate-report:
-      runs-on: ubuntu-latest
-      timeout-minutes: 60
-      permissions:
-        contents: write
-        actions: read
-        
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: read
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
