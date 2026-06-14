@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Sensitive tokens and configs
+config/.tushare_token
+config/.tushare_token.example
+*.token
+*_token
+secrets/
+
+# Outputs (optional: if you don't want to commit generated reports)
+# reports/output/
+# output/
