@@ -271,7 +271,8 @@ risk_management:
   # 止损计算方式：fixed(固定比例) / support_resistance(支撑/压力位)
   stop_loss_method: support_resistance
   # 固定止损比例（%），method=fixed 时使用
-  stop_loss_pct: -5.0
+  # 2026-06: 基于近3周回测最大单股亏损-8.58%，收紧止损以控制下行风险
+  stop_loss_pct: -4.0
   # 移动止盈回撤比例（%）
   trailing_stop_pct: 5.0
   # 目标价计算方式：fixed(固定比例) / support_resistance(支撑/压力位)

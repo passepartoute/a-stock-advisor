@@ -760,15 +760,14 @@ class TushareBacktester:
                     np.argsort(np.argsort(returns))
                 )[0, 1]
                 ic_results[factor_key] = rank_ic
-                direction = "正向有效" if rank_ic > 0 else "逆向"
                 if abs(rank_ic) > 0.2:
-                    effectiveness = "🟢 显著"
+                    effectiveness = "[显著]"
                 elif abs(rank_ic) > 0.1:
-                    effectiveness = "🟡 一般"
+                    effectiveness = "[一般]"
                 elif abs(rank_ic) > 0.05:
-                    effectiveness = "⚪ 微弱"
+                    effectiveness = "[微弱]"
                 else:
-                    effectiveness = "🔴 无效"
+                    effectiveness = "[无效]"
                 print(f"  {factor_label:<16} {rank_ic:+.4f}    {direction:<10} {effectiveness}")
 
         # IC 汇总建议
@@ -1137,7 +1136,7 @@ class TushareBacktester:
             grade = "A" if total_score / max_score > 0.8 else "B" if total_score / max_score > 0.65 else "C" if total_score / max_score > 0.5 else "D" if total_score / max_score > 0.35 else "E"
 
             for dim, score, detail in grade_scores:
-                bar = "█" * score + "░" * (10 - score)
+                bar = "#" * score + "-" * (10 - score)
                 print(f"  [{bar}] {dim}: {detail} ({score}/10)")
             print(f"\n  综合评级: [{grade}] ({total_score}/{max_score})")
 
