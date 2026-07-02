@@ -32,6 +32,10 @@ class DataFetcher:
         self._suspend_cache = None
         self._limit_list_cache = None
         self._holder_cache = {}
+        # 新闻/情绪数据缓存
+        self._news_cache = {}
+        self._comment_cache = {}
+        self._rating_cache = {}
 
     def _load_tushare_token(self):
         """从本地文件加载 tushare token"""
@@ -572,6 +576,228 @@ class DataFetcher:
         if not high.empty and "代码" in high.columns:
             high = high.sort_values("质押比例", ascending=False).reset_index(drop=True)
         return high
+
+    # ==================== 新闻/情绪数据 ====================
+
+    def get_stock_news(self, symbol: str, limit: int = 10,
+                        source: str = None) -> pd.DataFrame:
+        """
+        获取个股最新新闻与公告。
+
+        支持双数据源互补：
+        - akshare (stock_news_em): 财经媒体新闻，偏市场热点/突发事件
+        - tushare (pro.anns_d):   交易所/巨潮官方公告，偏合规/业绩/重大事项
+
+        Args:
+            symbol: 股票代码（自动去掉 sh/sz 前缀）
+            limit:  返回条数上限
+            source: "akshare" / "tushare" / "auto"，None 则使用 self.data_source
+
+        返回: DataFrame[标题, 发布时间, 摘要, 内容]
+        """
+        if symbol.startswith("sh") or symbol.startswith("sz"):
+            symbol = symbol[2:]
+        if symbol in self._news_cache:
+            return self._news_cache[symbol]
+
+        if self.data_source == "mock" or source == "mock":
+            self._news_cache[symbol] = pd.DataFrame()
+            return pd.DataFrame()
+
+        # 未指定时，优先跟随全局数据源；auto 表示双源合并
+        if source is None:
+            source = self.data_source
+
+        dfs = []
+        if source in ("auto", "akshare"):
+            try:
+                df_ak = ak.stock_news_em(symbol=symbol)
+                if df_ak is not None and not df_ak.empty:
+                    dfs.append(df_ak)
+            except Exception as e:
+                print(f"     [WARN] akshare 新闻获取失败 {symbol}: {e}")
+
+        if source in ("auto", "tushare"):
+            try:
+                df_ts = self._get_stock_news_tushare(symbol, limit=limit)
+                if df_ts is not None and not df_ts.empty:
+                    dfs.append(df_ts)
+            except Exception as e:
+                print(f"     [WARN] tushare 公告获取失败 {symbol}: {e}")
+
+        if dfs:
+            df = pd.concat(dfs, ignore_index=True)
+            df = self._standardize_news_df(df)
+            df = df.head(limit)
+        else:
+            df = pd.DataFrame()
+
+        self._news_cache[symbol] = df
+        return df
+
+    def _get_stock_news_tushare(self, symbol: str, limit: int = 10) -> pd.DataFrame:
+        """通过 tushare pro.anns_d / pro.anns 获取上市公司公告"""
+        pro = self._get_tushare_pro()
+        if not pro:
+            return pd.DataFrame()
+
+        try:
+            suffix = ".SH" if symbol.startswith("6") else ".SZ"
+            ts_code = f"{symbol}{suffix}"
+
+            # 优先新版 anns_d，失败回退旧版 anns
+            df = pd.DataFrame()
+            try:
+                df = pro.anns_d(ts_code=ts_code, limit=limit)
+            except Exception:
+                pass
+            if df is None or df.empty:
+                df = pro.anns(ts_code=ts_code, limit=limit)
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            # 列名映射（防御式：不同版本字段名可能不同）
+            rename_map = {}
+            if "title" in df.columns and "标题" not in df.columns:
+                rename_map["title"] = "标题"
+            date_col = None
+            for c in ["ann_date", "publish_date", "公告日期"]:
+                if c in df.columns and "发布时间" not in df.columns and "发布时间" not in rename_map.values():
+                    date_col = c
+                    break
+            if date_col:
+                rename_map[date_col] = "发布时间"
+            if "url" in df.columns and "摘要" not in df.columns:
+                rename_map["url"] = "摘要"
+            if "ann_type" in df.columns and "内容" not in df.columns:
+                rename_map["ann_type"] = "内容"
+            if "content" in df.columns and "内容" not in df.columns:
+                rename_map["content"] = "内容"
+
+            result = df.rename(columns=rename_map).copy()
+            for col in ["标题", "发布时间", "摘要", "内容"]:
+                if col not in result.columns:
+                    result[col] = ""
+            return result[["标题", "发布时间", "摘要", "内容"]]
+        except Exception as e:
+            print(f"     [WARN] tushare 公告解析失败 {symbol}: {e}")
+            return pd.DataFrame()
+
+    def _standardize_news_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """把不同来源的新闻 DataFrame 统一为 标题/发布时间/摘要/内容 四列"""
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        rename_map = {}
+        # 标题列
+        if "标题" not in df.columns:
+            for c in ["title", "新闻标题"]:
+                if c in df.columns:
+                    rename_map[c] = "标题"
+                    break
+        # 发布时间列
+        if "发布时间" not in df.columns:
+            for c in ["pub_date", "ann_date", "publish_date", "公告日期"]:
+                if c in df.columns:
+                    rename_map[c] = "发布时间"
+                    break
+        # 摘要列
+        if "摘要" not in df.columns:
+            for c in ["summary", "新闻摘要"]:
+                if c in df.columns:
+                    rename_map[c] = "摘要"
+                    break
+            if "摘要" not in df.columns and "内容" not in df.columns and "content" in df.columns:
+                rename_map["content"] = "摘要"
+        # 内容/链接列
+        if "内容" not in df.columns:
+            for c in ["content", "url", "新闻链接"]:
+                if c in df.columns:
+                    rename_map[c] = "内容"
+                    break
+
+        df = df.rename(columns=rename_map)
+        for col in ["标题", "发布时间", "摘要", "内容"]:
+            if col not in df.columns:
+                df[col] = ""
+        return df[["标题", "发布时间", "摘要", "内容"]]
+
+    def get_stock_comment(self, symbol: str) -> dict:
+        """
+        获取个股评论/情绪摘要 (akshare stock_comment_em)
+        返回: {"sentiment": str, "score": float}
+        """
+        if symbol.startswith("sh") or symbol.startswith("sz"):
+            symbol = symbol[2:]
+        if symbol in self._comment_cache:
+            return self._comment_cache[symbol]
+
+        result = {}
+        if self.data_source == "mock":
+            self._comment_cache[symbol] = result
+            return result
+
+        try:
+            # stock_comment_em 返回全市场数据，需按代码过滤
+            if not hasattr(self, '_comment_all'):
+                self._comment_all = ak.stock_comment_em()
+            df = self._comment_all
+            if df is not None and not df.empty and "代码" in df.columns:
+                row = df[df["代码"].astype(str).str.strip() == symbol]
+                if not row.empty:
+                    latest = row.iloc[0]
+                    # 综合得分 0-100，映射到 -1..1
+                    score_100 = float(latest.get("综合得分", 50) or 50)
+                    normalized = (score_100 - 50) / 50  # -1..1
+                    # 情绪标签
+                    if normalized > 0.2:
+                        sentiment = "看多"
+                    elif normalized < -0.2:
+                        sentiment = "看空"
+                    else:
+                        sentiment = "中性"
+                    result = {
+                        "sentiment": sentiment,
+                        "score": round(normalized, 3)
+                    }
+        except Exception as e:
+            print(f"     [WARN] 评论情绪获取失败 {symbol}: {e}")
+
+        self._comment_cache[symbol] = result
+        return result
+
+    def get_broker_rating(self, symbol: str) -> dict:
+        """
+        获取个股最新研报评级 (akshare stock_research_report_em)
+        返回: {"rating": str, "change": str, "org": str, "title": str, "date": str}
+        """
+        if symbol.startswith("sh") or symbol.startswith("sz"):
+            symbol = symbol[2:]
+        if symbol in self._rating_cache:
+            return self._rating_cache[symbol]
+
+        result = {}
+        if self.data_source == "mock":
+            self._rating_cache[symbol] = result
+            return result
+
+        try:
+            df = ak.stock_research_report_em(symbol=symbol)
+            if df is not None and not df.empty:
+                latest = df.iloc[0]
+                rating = str(latest.get("东财评级", ""))
+                result = {
+                    "rating": rating,
+                    "change": "",  # 该接口无变化字段
+                    "org": str(latest.get("机构", "")),
+                    "title": str(latest.get("报告名称", "")),
+                    "date": str(latest.get("日期", "")),
+                }
+        except Exception as e:
+            print(f"     [WARN] 研报评级获取失败 {symbol}: {e}")
+
+        self._rating_cache[symbol] = result
+        return result
 
     def get_market_capital_env(self) -> dict:
         """获取大盘资金面环境：北向资金 + 融资融券"""

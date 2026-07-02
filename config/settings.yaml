@@ -172,14 +172,122 @@ technical:
   volume_shrink_ratio: 0.7
 
 # ============================================================
+# 新闻/情绪因子配置（新增）
+# ============================================================
+news_sentiment:
+  # 是否启用新闻/情绪分析
+  enabled: true
+
+  # 数据来源: akshare(财经媒体新闻) / tushare(交易所官方公告) / auto(双源合并)
+  data_source: akshare
+
+  # 每只股票分析的新闻条数上限
+  max_news_per_stock: 10
+
+  # 新闻最大有效时长（小时），超过此时间的新闻忽略
+  max_news_age_hours: 48
+
+  # 最少需要多少条新闻才做判断（太少则标记为数据不足）
+  min_news_count: 2
+
+  # 综合评分降级阈值（-1.0 ~ 0.0），低于此值触发降级
+  downgrade_threshold: -0.1
+
+  # 综合评分否决阈值（保留，极端情况使用）
+  negative_threshold: -0.5
+
+  # 情绪评分权重
+  score_weights:
+    news: 0.5
+    comment: 0.3
+    rating: 0.2
+
+  # 否决/降级规则
+  veto_rules:
+    enabled: true
+    # 即时否决关键词（出现即跳过挂单）
+    instant_veto_keywords:
+      - "立案"
+      - "调查"
+      - "退市"
+      - "债务违约"
+    # 负面关键词库（命中后扣分）
+    keywords:
+      - "立案"
+      - "调查"
+      - "处罚"
+      - "监管"
+      - "问询"
+      - "警示"
+      - "整改"
+      - "退市"
+      - "ST"
+      - "亏损"
+      - "业绩预亏"
+      - "业绩下滑"
+      - "营收下降"
+      - "净利润下降"
+      - "大股东减持"
+      - "高管减持"
+      - "减持计划"
+      - "清仓减持"
+      - "解禁"
+      - "合同纠纷"
+      - "诉讼"
+      - "仲裁"
+      - "赔偿"
+      - "产品召回"
+      - "停产"
+      - "整顿"
+      - "查封"
+      - "债务违约"
+      - "评级下调"
+      - "卖出评级"
+      - "减持评级"
+    # 负面新闻条数阈值：N 条以上负面新闻触发否决
+    negative_news_count_threshold: 2
+    # 研报评级下调至以下级别触发否决
+    veto_on_downgrade_to:
+      - "减持"
+      - "卖出"
+    # 评论情绪评分低于此值触发否决
+    veto_on_bearish_comment_threshold: -0.6
+
+# ============================================================
+# 预市场重要信息收集（新增）
+# ============================================================
+pre_market_info:
+  # 是否启用开盘前信息过滤
+  enabled: true
+
+  # 信息来源
+  sources:
+    - "overnight_news"         # 隔夜新闻
+    - "broker_ratings"         # 券商研报评级变化
+    - "social_sentiment"       # 社交媒体情绪
+
+  # 负面消息处理方式: veto(直接跳过挂单) / downgrade(降级)
+  action_on_negative: "downgrade"
+
+  # 降级映射
+  downgrade_map:
+    "强烈关注": "关注"
+    "关注": "轻度关注"
+    "轻度关注": "观望"
+
+  # 每日最大处理股票数（防止过度过滤）
+  max_daily_affected: 5
+
+# ============================================================
 # 买入信号权重（新增动态权重机制）
 # ============================================================
 signal_weights:
   # 基础权重
-  # v2.3: IC分析驱动 — 资金面(IC+0.51)提权, 动量(IC-0.08)降权至10%, 技术面(IC+0.13)提权
+  # v2.4: 基于2026-06月回测IC — 技术面(IC+0.71)显著正向, 基本面(IC-0.26)反向,
+  #       资金面(IC+0.33)显著正向。提权技术面, 降权基本面。
   base:
-    fundamental: 0.25
-    technical: 0.40
+    fundamental: 0.20
+    technical: 0.45
     momentum: 0.10
     capital_flow: 0.25
 
@@ -188,20 +296,20 @@ signal_weights:
     enabled: true
     # 强势市场（大盘在年线之上）
     bull_trend:
-      fundamental: 0.20
-      technical: 0.45
+      fundamental: 0.15
+      technical: 0.50
       momentum: 0.10
       capital_flow: 0.25
     # 弱势市场（大盘在年线之下）：资金面防御权重最高，动量几乎不参与
     bear_trend:
-      fundamental: 0.30
-      technical: 0.30
+      fundamental: 0.25
+      technical: 0.35
       momentum: 0.05
       capital_flow: 0.35
     # 震荡/不明
     neutral:
-      fundamental: 0.25
-      technical: 0.40
+      fundamental: 0.20
+      technical: 0.45
       momentum: 0.10
       capital_flow: 0.25
 

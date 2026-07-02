@@ -28,14 +28,34 @@ class PreMarketPlanner:
     # 公开方法
     # ------------------------------------------------------------------
 
-    def generate_all(self, results: list) -> List[Dict]:
-        """对值得挂单的股票批量生成挂单计划"""
+    def generate_all(self, results: list,
+                     sentiment_map: dict = None) -> List[Dict]:
+        """
+        对值得挂单的股票批量生成挂单计划。
+
+        Args:
+            results: 股票分析结果列表
+            sentiment_map: {code: NewsSentimentAnalyzer.analyze_result}，
+                           用于记录因消息面被跳过的股票
+        """
         orders = []
         seen = set()
+        self.skipped_sentiment = []
+
         for r in results:
             advice = r.get("advice", "")
             code = r.get("code", "")
             if advice not in _ORDERABLE_ADVICE:
+                # 记录因消息面降级/否决导致无法挂单的股票
+                if sentiment_map and code in sentiment_map:
+                    sent = sentiment_map[code]
+                    if sent.get("action") in ("veto", "downgrade"):
+                        self.skipped_sentiment.append({
+                            "code": code,
+                            "name": r.get("name", ""),
+                            "action": sent.get("action"),
+                            "reason": sent.get("action_reason", "")
+                        })
                 continue
             # 行业分散后可能出现重复（理论上不会，但加一层去重）
             if code in seen:
@@ -217,24 +237,29 @@ class PreMarketPlanner:
     def summarize(self, orders: List[Dict]) -> str:
         """生成一段简短的操作提醒文字"""
         if not orders:
-            return "今日无适合开盘前挂单的标的。"
+            base = "今日无适合开盘前挂单的标的。"
+        else:
+            n = len(orders)
+            # 取前3只作为重点关注
+            top_codes = "、".join(f"{o['code']} {o['name']}" for o in orders[:3])
+            # 根据评分等级分类
+            strong = [o for o in orders if o["advice"] in ("强烈关注", "关注")]
+            mild = [o for o in orders if o["advice"] == "轻度关注"]
 
-        n = len(orders)
-        # 取前3只作为重点关注
-        top_codes = "、".join(f"{o['code']} {o['name']}" for o in orders[:3])
-        # 根据评分等级分类
-        strong = [o for o in orders if o["advice"] in ("强烈关注", "关注")]
-        mild = [o for o in orders if o["advice"] == "轻度关注"]
+            parts = []
+            if strong:
+                parts.append(f"重点关注 {len(strong)} 只")
+            if mild:
+                parts.append(f"轻度关注 {len(mild)} 只")
+            detail = "、".join(parts)
 
-        parts = []
-        if strong:
-            parts.append(f"重点关注 {len(strong)} 只")
-        if mild:
-            parts.append(f"轻度关注 {len(mild)} 只")
-        detail = "、".join(parts)
+            base = (
+                f"共 {n} 只值得挂单（{detail}），"
+                f"TOP3: {top_codes}。"
+                f"高开>{self.gap_up_cancel_pct}% 或低开破止损则放弃对应挂单。"
+            )
 
-        return (
-            f"共 {n} 只值得挂单（{detail}），"
-            f"TOP3: {top_codes}。"
-            f"高开>{self.gap_up_cancel_pct}% 或低开破止损则放弃对应挂单。"
-        )
+        if hasattr(self, 'skipped_sentiment') and self.skipped_sentiment:
+            n = len(self.skipped_sentiment)
+            base += f" | 消息面过滤 {n} 只"
+        return base

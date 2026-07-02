@@ -12,13 +12,15 @@ class DailyReport:
     def generate_markdown(self, results: list, market_env: dict = None,
                           date_str: str = None, avoid_list: list = None,
                           veto_list: list = None, div_notes: list = None,
-                          pre_market_orders: list = None) -> str:
+                          pre_market_orders: list = None,
+                          sentiment_skipped: list = None) -> str:
         """生成 Markdown 报告"""
         date_str = date_str or datetime.now().strftime("%Y-%m-%d")
         avoid_list = avoid_list or []
         veto_list = veto_list or []
         div_notes = div_notes or []
         pre_market_orders = pre_market_orders or []
+        sentiment_skipped = sentiment_skipped or []
 
         lines = [
             f"# A股每日投资建议 - {date_str}",
@@ -116,6 +118,26 @@ class DailyReport:
         # ====== 开盘前挂单指南 ======
         if pre_market_orders:
             lines.extend(self._render_pre_market_section(pre_market_orders))
+
+        # 消息面过滤清单
+        if sentiment_skipped:
+            lines.extend([
+                "",
+                "## ! 消息面过滤清单",
+                "",
+                "> 以下股票因隔夜新闻、评论情绪或研报评级变化被降级/跳过挂单：",
+                "",
+                "| 代码 | 名称 | 操作 | 原因 |",
+                "|------|------|------|------|"
+            ])
+            for s in sentiment_skipped[:30]:
+                lines.append(
+                    f"| {s.get('code', '')} | {s.get('name', '')} | "
+                    f"{s.get('action', '')} | {s.get('reason', '')} |"
+                )
+            if len(sentiment_skipped) > 30:
+                lines.append(f"| ... | 等共 {len(sentiment_skipped)} 只 | - | - |")
+            lines.append("")
 
         # 一票否决清单
         if veto_list:
@@ -303,7 +325,8 @@ class DailyReport:
 
     def print_console(self, results: list, market_env: dict = None,
                       avoid_list: list = None, veto_list: list = None,
-                      pre_market_orders: list = None):
+                      pre_market_orders: list = None,
+                      sentiment_skipped: list = None):
         """终端彩色输出"""
         from rich.console import Console
         from rich.table import Table
@@ -313,6 +336,7 @@ class DailyReport:
         avoid_list = avoid_list or []
         veto_list = veto_list or []
         pre_market_orders = pre_market_orders or []
+        sentiment_skipped = sentiment_skipped or []
 
         console.print(f"\n[bold cyan]{'='*60}[/bold cyan]")
         console.print(f"[bold cyan]A股每日投资建议 - {datetime.now().strftime('%Y-%m-%d')}[/bold cyan]")
@@ -383,6 +407,27 @@ class DailyReport:
         # ==== 开盘前挂单控制台输出 ====
         if pre_market_orders:
             self._print_pre_market_console(console, pre_market_orders)
+
+        # 消息面过滤清单
+        if sentiment_skipped:
+            console.print(f"[bold yellow]! 消息面过滤清单 ({len(sentiment_skipped)} 只)[/bold yellow]")
+            console.print("[dim]以下股票因隔夜新闻/情绪/评级变化被降级或跳过挂单[/dim]\n")
+            sent_table = Table(box=box.SIMPLE)
+            sent_table.add_column("代码", justify="center")
+            sent_table.add_column("名称")
+            sent_table.add_column("操作")
+            sent_table.add_column("原因")
+            for s in sentiment_skipped[:10]:
+                sent_table.add_row(
+                    s.get("code", ""),
+                    s.get("name", ""),
+                    s.get("action", ""),
+                    s.get("reason", "")
+                )
+            if len(sentiment_skipped) > 10:
+                sent_table.add_row("...", f"等共 {len(sentiment_skipped)} 只", "", "")
+            console.print(sent_table)
+            console.print("")
 
         # 一票否决清单
         if veto_list:

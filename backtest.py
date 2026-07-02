@@ -768,6 +768,7 @@ class TushareBacktester:
                     effectiveness = "[微弱]"
                 else:
                     effectiveness = "[无效]"
+                direction = "正向有效" if rank_ic > 0 else "逆向"
                 print(f"  {factor_label:<16} {rank_ic:+.4f}    {direction:<10} {effectiveness}")
 
         # IC 汇总建议

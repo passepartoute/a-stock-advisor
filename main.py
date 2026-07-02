@@ -28,6 +28,7 @@ from strategies.signal_engine_v2 import SignalEngineV2
 from strategies.market_regime import MarketRegimeDetector
 from strategies.risk_manager import RiskManager
 from strategies.pre_market import PreMarketPlanner
+from strategies.news_sentiment import NewsSentimentAnalyzer, apply_sentiment_action
 from reports.daily_report import DailyReport
 
 
@@ -408,6 +409,23 @@ def main(use_mock: bool = False):
     else:
         print(f"     [演示模式] 跳过财务数据获取")
 
+    # 3.6 新闻/情绪数据（盘前重要信息）
+    print("\n[3.6/5] 获取新闻/情绪数据...")
+    sentiment_map = {}
+    ns_config = config.get("news_sentiment", {})
+    if ns_config.get("enabled", False) and not use_mock:
+        try:
+            sentiment_map = NewsSentimentAnalyzer.batch_analyze(
+                candidate_codes, fetcher, config, max_workers=4
+            )
+            n_downgrade = sum(1 for v in sentiment_map.values() if v.get("action") == "downgrade")
+            n_veto = sum(1 for v in sentiment_map.values() if v.get("action") == "veto")
+            print(f"     情绪分析: {len(sentiment_map)} 只，降级 {n_downgrade} 只，否决 {n_veto} 只")
+        except Exception as e:
+            print(f"     [WARN] 新闻情绪获取失败: {e}，跳过")
+    else:
+        print(f"     {'[演示模式] 跳过' if use_mock else '未启用，跳过'}")
+
     # 4. 技术面 + 动量 + 风控分析（多线程）
     print("\n[4/5] 技术面与动量分析...")
     results = []
@@ -448,6 +466,22 @@ def main(use_mock: bool = False):
     print("\n[5/5] 综合排序...")
     results.sort(key=lambda x: x["total_score"], reverse=True)
 
+    # 5.1 应用消息面降级/否决
+    if sentiment_map:
+        downgrade_map = config.get("pre_market_info", {}).get("downgrade_map", {})
+        n_applied = 0
+        for i, r in enumerate(results):
+            code = r.get("code", "")
+            if code in sentiment_map:
+                new_r = apply_sentiment_action(r, sentiment_map[code], downgrade_map)
+                if new_r is not r:
+                    results[i] = new_r
+                    n_applied += 1
+        if n_applied > 0:
+            print(f"     消息面处理: {n_applied} 只")
+            # 重新排序（降级后分数可能变化）
+            results.sort(key=lambda x: x["total_score"], reverse=True)
+
     print(f"     分析完成: 共 {len(results)} 只，一票否决 {veto_count} 只，数据异常 {data_invalid_count} 只")
 
     # 5.5 行业分散限制
@@ -458,12 +492,26 @@ def main(use_mock: bool = False):
     # 6. 生成报告
     print("\n[6/5] 生成报告...")
     avoid_list = screener.avoided_pledge_stocks if hasattr(screener, 'avoided_pledge_stocks') else []
-    veto_list = engine.get_excluded_stocks(results)
+    engine_veto_list = engine.get_excluded_stocks(results)
+    # 补充消息面否决/降级导致的回避
+    sentiment_veto_list = [
+        {
+            "code": r.get("code", ""),
+            "name": r.get("name", ""),
+            "sector": r.get("sector", ""),
+            "reason": r.get("veto_reason", r.get("sentiment_reason", ""))
+        }
+        for r in results
+        if r.get("veto") and r.get("veto_reason", "").startswith("消息面:")
+    ]
+    veto_list = engine_veto_list + sentiment_veto_list
 
     # 6.5 开盘前挂单规划
     pre_market_orders = []
+    sentiment_skipped = []
     if config.get("pre_market_order", {}).get("enabled", True):
-        pre_market_orders = pre_market_planner.generate_all(results_for_report)
+        pre_market_orders = pre_market_planner.generate_all(results_for_report, sentiment_map=sentiment_map)
+        sentiment_skipped = getattr(pre_market_planner, 'skipped_sentiment', [])
         summary = pre_market_planner.summarize(pre_market_orders)
         print(f"     [开盘挂单] {summary}")
 
@@ -474,7 +522,8 @@ def main(use_mock: bool = False):
         results_for_report, market_env,
         avoid_list=avoid_list, veto_list=veto_list,
         div_notes=div_notes,
-        pre_market_orders=pre_market_orders
+        pre_market_orders=pre_market_orders,
+        sentiment_skipped=sentiment_skipped
     )
     print(f"\n报告已保存: {filepath}")
 
