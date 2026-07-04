@@ -40,6 +40,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      # CI 环境下使用 data_source: auto，自动在 akshare / tushare / mock 之间降级，提高稳定性
+      DATA_SOURCE: auto
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -90,6 +93,10 @@ jobs:
           echo "Generated files:"
           find reports/output -type f -name "*.md" 2>/dev/null || true
 
+      - name: Copy markdown viewer
+        run: |
+          cp viewer.html reports/output/viewer.html
+
       - name: Generate Pages index
         run: |
           mkdir -p reports/output
@@ -102,7 +109,7 @@ jobs:
             echo '<h1>A-Stock 每日选股报告</h1>'
             echo '<ul>'
             for f in $REPORTS; do
-              echo "<li><a href=\"$f\">$f</a></li>"
+              echo "<li><a href=\"viewer.html?report=$f\">$f</a></li>"
             done
             echo '</ul>'
             echo '<p>自动生成于 ${{ github.run_started_at }}</p>'

@@ -283,8 +283,10 @@ def main(use_mock: bool = False):
     print("=" * 60)
 
     config = load_config()
+    # 允许通过环境变量覆盖数据源，便于 CI 使用 auto 提高稳定性
+    data_source = os.environ.get("DATA_SOURCE", config.get("data_source", "auto"))
     fetcher = DataFetcher(
-        data_source=config.get("data_source", "auto"),
+        data_source=data_source,
     )
     engine = SignalEngineV2(config)
     regime_detector = MarketRegimeDetector(config)
