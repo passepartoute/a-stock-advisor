@@ -119,24 +119,6 @@ jobs:
           publish_dir: ./reports/output
           keep_files: true
 
-      - name: Create GitHub Release
-        # 仅在手动触发时创建 Release，避免每日自动运行产生大量 Release
-        if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: report-${{ github.run_id }}
-          name: "A-Stock Report ${{ github.run_id }}"
-          body: |
-            自动生成报告
-
-            - 类型：${{ github.event.action || github.event.inputs.report_type }}
-            - 运行时间：${{ github.run_started_at }}
-
-            报告文件见下方附件。
-          files: reports/output/*.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       # 可选：邮件通知（需要配置 EMAIL_USERNAME 和 EMAIL_PASSWORD secrets）
       - name: Send email notification
         if: env.EMAIL_USERNAME != ''
