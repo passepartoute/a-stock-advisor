@@ -13,7 +13,8 @@ class DailyReport:
                           date_str: str = None, avoid_list: list = None,
                           veto_list: list = None, div_notes: list = None,
                           pre_market_orders: list = None,
-                          sentiment_skipped: list = None) -> str:
+                          sentiment_skipped: list = None,
+                          ai_signals: dict = None) -> str:
         """生成 Markdown 报告"""
         date_str = date_str or datetime.now().strftime("%Y-%m-%d")
         avoid_list = avoid_list or []
@@ -21,6 +22,7 @@ class DailyReport:
         div_notes = div_notes or []
         pre_market_orders = pre_market_orders or []
         sentiment_skipped = sentiment_skipped or []
+        ai_signals = ai_signals or {}
 
         lines = [
             f"# A股每日投资建议 - {date_str}",
@@ -51,12 +53,44 @@ class DailyReport:
             lines.append("- **判断**: " + " | ".join(market_env.get("notes", [])))
             lines.append("")
 
+        # AI 宏观解读
+        if ai_signals:
+            macro = float(ai_signals.get("macro_sentiment", 0))
+            style = str(ai_signals.get("style_bias", "neutral"))
+            style_cn = {"growth": "成长", "value": "价值", "defensive": "防御",
+                        "momentum": "动量", "neutral": "均衡"}.get(style, style)
+            sentiment_str = "偏多" if macro > 0.3 else "偏空" if macro < -0.3 else "中性"
+            lines.extend([
+                "## AI 宏观解读",
+                "",
+                f"- **宏观情绪**: {sentiment_str} ({macro:+.2f})",
+                f"- **风格偏好**: {style_cn}",
+                f"- **热门行业**: {', '.join(ai_signals.get('hot_sectors', [])[:8])}",
+                f"- **风险事件**: {', '.join(ai_signals.get('risk_events', [])[:5])}",
+                "",
+                f"**AI 摘要**: {ai_signals.get('raw_summary', 'N/A')[:500]}",
+                "",
+            ])
+            mentions = ai_signals.get("stock_mentions", [])
+            if mentions:
+                lines.extend([
+                    "### AI 提及个股",
+                    "",
+                    "| 代码 | 名称 | 情绪 |",
+                    "|------|------|------|"
+                ])
+                for m in mentions[:10]:
+                    s = float(m.get("sentiment", 0))
+                    s_str = "正面" if s > 0.2 else "负面" if s < -0.2 else "中性"
+                    lines.append(f"| {m.get('code', '')} | {m.get('name', '')} | {s_str} ({s:+.2f}) |")
+                lines.append("")
+
         # 今日精选
         lines.extend([
             "## 今日精选",
             "",
-            "| 排名 | 代码 | 名称 | 行业 | 综合评分 | 建议 | 最新价 | 技术面 | 基本面 | 动量 | 资金面 | 关键信号 |",
-            "|------|------|------|------|----------|------|--------|--------|--------|------|--------|----------|"
+            "| 排名 | 代码 | 名称 | 行业 | 综合评分 | 建议 | 最新价 | 技术面 | 基本面 | 动量 | 资金面 | AI信号 | 关键信号 |",
+            "|------|------|------|------|----------|------|--------|--------|--------|------|--------|--------|----------|"
         ])
 
         for i, r in enumerate(results[:20], 1):
@@ -68,13 +102,18 @@ class DailyReport:
             )
             if r.get("conflict_triggered"):
                 signals += " / [看跌信号冲突]"
+            ai_sig = " / ".join(filter(None, [
+                "AI提及" if r.get("ai_sentiment_reason") else "",
+                "AI行业利好" if any("AI行业利好" in s for s in d.get("fundamental", {}).get("signals", [])) else "",
+                "AI行业利空" if any("AI行业利空" in s for s in d.get("fundamental", {}).get("signals", [])) else "",
+            ]))
             price = r.get("latest_price", 0)
             cf_score = d.get("capital_flow", {}).get("score", 0)
             lines.append(
                 f"| {i} | {r['code']} | {r['name']} | {r.get('sector','')} | "
                 f"{r['total_score']} | {r['advice']} | {price} | "
                 f"{d['technical']['score']} | {d['fundamental']['score']} | "
-                f"{d['momentum']['score']} | {cf_score} | {signals} |"
+                f"{d['momentum']['score']} | {cf_score} | {ai_sig or '-'} | {signals} |"
             )
 
         # 行业分散说明
@@ -326,7 +365,8 @@ class DailyReport:
     def print_console(self, results: list, market_env: dict = None,
                       avoid_list: list = None, veto_list: list = None,
                       pre_market_orders: list = None,
-                      sentiment_skipped: list = None):
+                      sentiment_skipped: list = None,
+                      ai_signals: dict = None):
         """终端彩色输出"""
         from rich.console import Console
         from rich.table import Table
@@ -337,6 +377,7 @@ class DailyReport:
         veto_list = veto_list or []
         pre_market_orders = pre_market_orders or []
         sentiment_skipped = sentiment_skipped or []
+        ai_signals = ai_signals or {}
 
         console.print(f"\n[bold cyan]{'='*60}[/bold cyan]")
         console.print(f"[bold cyan]A股每日投资建议 - {datetime.now().strftime('%Y-%m-%d')}[/bold cyan]")
@@ -360,6 +401,18 @@ class DailyReport:
                 f"{valid_mark}{capital_notes}\n"
             )
 
+        # AI 宏观解读
+        if ai_signals:
+            macro = float(ai_signals.get("macro_sentiment", 0))
+            style = str(ai_signals.get("style_bias", "neutral"))
+            style_cn = {"growth": "成长", "value": "价值", "defensive": "防御",
+                        "momentum": "动量", "neutral": "均衡"}.get(style, style)
+            sentiment_str = "偏多" if macro > 0.3 else "偏空" if macro < -0.3 else "中性"
+            console.print(f"[bold]AI 宏观解读[/bold]: 情绪{sentiment_str}({macro:+.2f}) | 风格{style_cn}")
+            console.print(f"  热门行业: {', '.join(ai_signals.get('hot_sectors', [])[:8])}")
+            console.print(f"  风险事件: {', '.join(ai_signals.get('risk_events', [])[:5])}")
+            console.print("")
+
         # 结果表格
         table = Table(box=box.SIMPLE_HEAD)
         table.add_column("排名", justify="center", style="bold")
@@ -370,6 +423,7 @@ class DailyReport:
         table.add_column("建议", justify="center")
         table.add_column("最新价", justify="right")
         table.add_column("资金面")
+        table.add_column("AI信号")
         table.add_column("关键信号")
 
         advice_colors = {
@@ -390,6 +444,11 @@ class DailyReport:
             if r.get("conflict_triggered"):
                 signals += " / [冲突]"
             cf_signals = " / ".join(d.get("capital_flow", {}).get("signals", [])[:2])
+            ai_sig = " / ".join(filter(None, [
+                "AI提及" if r.get("ai_sentiment_reason") else "",
+                "AI行业利好" if any("AI行业利好" in s for s in d.get("fundamental", {}).get("signals", [])) else "",
+                "AI行业利空" if any("AI行业利空" in s for s in d.get("fundamental", {}).get("signals", [])) else "",
+            ]))
             color = advice_colors.get(r["advice"], "white")
             price = r.get("latest_price", 0)
             table.add_row(
@@ -398,6 +457,7 @@ class DailyReport:
                 f"[{color}]{r['advice']}[/{color}]",
                 f"{price:.2f}",
                 cf_signals,
+                ai_sig or "-",
                 signals
             )
 

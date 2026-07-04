@@ -1,5 +1,6 @@
 import pandas as pd
 import re
+from strategies.ai_factor_adjuster import AIFactorAdjuster
 
 class FundamentalScreener:
     """基本面筛选器——完整版：行业 + 市值 + 估值 + ST排除"""
@@ -88,7 +89,7 @@ class FundamentalScreener:
         sector = str(sector)
         return any(kw in sector for kw in keywords)
 
-    def screen(self) -> pd.DataFrame:
+    def screen(self, ai_signals: dict = None) -> pd.DataFrame:
         """基本面初筛：排除 + 硬条件过滤"""
         df = self.df.copy()
         if df.empty:
@@ -96,15 +97,25 @@ class FundamentalScreener:
 
         initial_count = len(df)
 
+        # 0. AI 行业信号调整（在原有配置基础上扩展白名单/黑名单）
+        preferred = self.stock_pool_cfg.get("preferred_sectors", [])
+        excluded = self.stock_pool_cfg.get("excluded_sectors", [])
+        if ai_signals:
+            adjuster = AIFactorAdjuster(self.config)
+            preferred, excluded = adjuster.adjust_sector_filter(preferred, excluded, ai_signals)
+            added_hot = [s for s in preferred if s not in self.stock_pool_cfg.get("preferred_sectors", [])]
+            added_cold = [s for s in excluded if s not in self.stock_pool_cfg.get("excluded_sectors", [])]
+            if added_hot:
+                print(f"     [AI] 加入热门行业: {', '.join(added_hot)}")
+            if added_cold:
+                print(f"     [AI] 加入回避行业: {', '.join(added_cold)}")
+
         # 1. 排除 ST/*ST/退市
         if "名称" in df.columns:
             mask_st = ~df["名称"].apply(self._is_st)
             df = df[mask_st].copy()
 
         # 2. 行业过滤
-        preferred = self.stock_pool_cfg.get("preferred_sectors", [])
-        excluded = self.stock_pool_cfg.get("excluded_sectors", [])
-
         if "所属行业" in df.columns:
             # 先排除黑名单
             if excluded:
@@ -224,10 +235,12 @@ class FundamentalScreener:
         print(f"     基本面初筛: {initial_count} -> {final_count} 只")
         return df.reset_index(drop=True)
 
-    def score(self, stock_row: pd.Series, financial_data: dict = None) -> dict:
+    def score(self, stock_row: pd.Series, financial_data: dict = None,
+              ai_signals: dict = None) -> dict:
         """
         对单只股票基本面打分 -1 ~ 1
         financial_data: 预留，Phase 2 传入详细财务指标
+        ai_signals: AI 简报提取的宏观信号，用于行业加分/扣分
         """
         score = 0.0
         signals = []
@@ -366,5 +379,16 @@ class FundamentalScreener:
             elif holder_trend == "disperse":
                 score -= 0.05
                 signals.append(f"筹码分散{holder_change:+.1f}%")
+
+        # ---------- 9. AI 行业信号调整 ----------
+        if ai_signals:
+            adjuster = AIFactorAdjuster(self.config)
+            original_score = score
+            score = adjuster.adjust_fundamental_score(score, sector, ai_signals)
+            delta = round(score - original_score, 3)
+            if delta > 0.001:
+                signals.append(f"AI行业利好(+{delta})")
+            elif delta < -0.001:
+                signals.append(f"AI行业利空({delta})")
 
         return {"score": round(max(-1, min(1, score)), 2), "signals": signals}

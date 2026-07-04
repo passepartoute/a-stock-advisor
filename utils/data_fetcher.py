@@ -1,6 +1,7 @@
 import akshare as ak
 import pandas as pd
 import numpy as np
+from typing import Optional
 from datetime import datetime, timedelta
 import time
 import os
@@ -36,6 +37,8 @@ class DataFetcher:
         self._news_cache = {}
         self._comment_cache = {}
         self._rating_cache = {}
+        # 每日财经简报缓存
+        self._daily_briefing_cache = None
 
     def _load_tushare_token(self):
         """从本地文件加载 tushare token"""
@@ -837,3 +840,205 @@ class DataFetcher:
             pass
         self._market_capital_cache = env
         return env
+
+    # ==================== 每日财经简报 ====================
+
+    def get_daily_briefing(self, config: dict = None) -> pd.DataFrame:
+        """
+        获取当天实时财经简报，主源财联社，失败时按配置降级。
+
+        返回: DataFrame[时间, 来源, 标题, 内容]
+        """
+        if self._daily_briefing_cache is not None:
+            return self._daily_briefing_cache
+
+        cfg = config or {}
+        ai_cfg = cfg.get("ai_briefing", {})
+        ns_cfg = ai_cfg.get("news_sources", {})
+        max_age_hours = ns_cfg.get("max_age_hours", 24)
+        max_items = ns_cfg.get("max_items_per_source", 200)
+        min_items = ns_cfg.get("min_items_threshold", 20)
+        max_chars = ns_cfg.get("max_briefing_chars", 50000)
+
+        primary = ns_cfg.get("primary", "cls_alerts")
+        fallbacks = ns_cfg.get("fallbacks", [])
+
+        all_records = []
+
+        # 主源
+        primary_records = self._fetch_briefing_source(primary, max_items=max_items)
+        all_records.extend(primary_records)
+        if len(all_records) >= min_items:
+            df = self._build_briefing_df(all_records, max_age_hours, max_chars)
+            self._daily_briefing_cache = df
+            return df
+
+        # 降级源
+        for src in fallbacks:
+            fallback_records = self._fetch_briefing_source(src, max_items=max_items)
+            all_records.extend(fallback_records)
+            if len(all_records) >= min_items:
+                break
+
+        df = self._build_briefing_df(all_records, max_age_hours, max_chars)
+        self._daily_briefing_cache = df
+        return df
+
+    def _fetch_briefing_source(self, source: str, max_items: int = 200) -> list:
+        """根据 source 名称抓取简报，返回记录列表"""
+        try:
+            if source == "cls_alerts":
+                return self._fetch_cls_alerts(max_items)
+            if source == "em_global":
+                return self._fetch_em_global(max_items)
+            if source == "sina_global":
+                return self._fetch_sina_global(max_items)
+            if source == "ths_live":
+                return self._fetch_ths_live(max_items)
+            if source == "futu_global":
+                return self._fetch_futu_global(max_items)
+        except Exception as e:
+            print(f"     [WARN] 简报来源 {source} 获取失败: {e}")
+        return []
+
+    def _fetch_cls_alerts(self, max_items: int = 200) -> list:
+        """财联社 A 股快讯（akshare 旧接口已下线，保留兼容）"""
+        if not hasattr(ak, "stock_zh_a_alerts_cls"):
+            return []
+        df = ak.stock_zh_a_alerts_cls()
+        return self._normalize_briefing_df(df, source="cls", content_col="快讯信息",
+                                           time_col="时间", max_items=max_items)
+
+    def _fetch_em_global(self, max_items: int = 200) -> list:
+        """东方财富全球快讯"""
+        df = ak.stock_info_global_em()
+        return self._normalize_briefing_df(df, source="em", content_col="摘要",
+                                           title_col="标题", time_col="发布时间",
+                                           max_items=max_items)
+
+    def _fetch_sina_global(self, max_items: int = 200) -> list:
+        """新浪财经全球快讯"""
+        df = ak.stock_info_global_sina()
+        return self._normalize_briefing_df(df, source="sina", content_col="内容",
+                                           time_col="时间", max_items=max_items)
+
+    def _fetch_ths_live(self, max_items: int = 200) -> list:
+        """同花顺财经直播"""
+        df = ak.stock_info_global_ths()
+        return self._normalize_briefing_df(df, source="ths", content_col="内容",
+                                           title_col="标题", time_col="发布时间",
+                                           max_items=max_items)
+
+    def _fetch_futu_global(self, max_items: int = 200) -> list:
+        """富途牛牛全球快讯"""
+        df = ak.stock_info_global_futu()
+        return self._normalize_briefing_df(df, source="futu", content_col="内容",
+                                           title_col="标题", time_col="发布时间",
+                                           max_items=max_items)
+
+    def _normalize_briefing_df(self, df: pd.DataFrame, source: str,
+                               content_col: str = None, title_col: str = None,
+                               time_col: str = None, max_items: int = 200) -> list:
+        """把不同来源简报统一为记录列表"""
+        if df is None or df.empty:
+            return []
+
+        records = []
+        for _, row in df.head(max_items).iterrows():
+            content = ""
+            if content_col and content_col in row:
+                content = str(row[content_col] or "")
+            title = ""
+            if title_col and title_col in row:
+                title = str(row[title_col] or "")
+            if not content and title:
+                content = title
+            if not content:
+                continue
+
+            time_val = ""
+            if time_col and time_col in row:
+                time_val = str(row[time_col] or "")
+
+            # 去重：相同内容跳过
+            if any(r["内容"] == content for r in records):
+                continue
+
+            records.append({
+                "时间": time_val,
+                "来源": source,
+                "标题": title,
+                "内容": content,
+            })
+        return records
+
+    def _build_briefing_df(self, records: list, max_age_hours: int,
+                           max_chars: int) -> pd.DataFrame:
+        """构建最终简报 DataFrame，过滤时间并限制总长度"""
+        if not records:
+            return pd.DataFrame(columns=["时间", "来源", "标题", "内容"])
+
+        df = pd.DataFrame(records)
+
+        # 时间过滤
+        if max_age_hours > 0 and "时间" in df.columns:
+            cutoff = datetime.now() - timedelta(hours=max_age_hours)
+            kept = []
+            for _, row in df.iterrows():
+                dt = self._parse_briefing_time(row.get("时间", ""))
+                if dt is None or dt >= cutoff:
+                    kept.append(row)
+            df = pd.DataFrame(kept, columns=df.columns).reset_index(drop=True)
+
+        # 限制总字符数，优先保留最新（假设 DataFrame 已按时间倒序或正序）
+        total_chars = df["内容"].astype(str).str.len().sum() if "内容" in df.columns else 0
+        if total_chars > max_chars and not df.empty:
+            kept = []
+            current = 0
+            # 优先保留时间更近的（按索引靠后的一般更晚）
+            for _, row in df.iterrows():
+                text = str(row.get("内容", ""))
+                if current + len(text) <= max_chars:
+                    kept.append(row)
+                    current += len(text)
+                else:
+                    break
+            df = pd.DataFrame(kept, columns=df.columns).reset_index(drop=True)
+
+        return df
+
+    def _parse_briefing_time(self, value) -> Optional[datetime]:
+        """解析简报时间，支持多种格式"""
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        text = str(value).strip()
+        if not text or text.lower() in ("nan", "none", ""):
+            return None
+
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%Y%m%d%H%M%S",
+            "%Y%m%d%H%M",
+            "%Y%m%d",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%Y/%m/%d",
+            "%H:%M:%S",
+            "%H:%M",
+        ]
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(text, fmt)
+                # 只有时间的补齐今天日期
+                if fmt in ("%H:%M:%S", "%H:%M"):
+                    now = datetime.now()
+                    dt = dt.replace(year=now.year, month=now.month, day=now.day)
+                return dt
+            except ValueError:
+                continue
+        try:
+            return pd.to_datetime(text)
+        except Exception:
+            return None

@@ -21,10 +21,11 @@ Thumbs.db
 # Sensitive tokens and configs
 config/.tushare_token
 config/.tushare_token.example
+config/.llm_api_key
 *.token
 *_token
 secrets/
 
-# Outputs (optional: if you don't want to commit generated reports)
-# reports/output/
-# output/
+# Outputs (generated reports are deployed to gh-pages branch, not main)
+reports/output/
+output/

@@ -29,6 +29,8 @@ from strategies.market_regime import MarketRegimeDetector
 from strategies.risk_manager import RiskManager
 from strategies.pre_market import PreMarketPlanner
 from strategies.news_sentiment import NewsSentimentAnalyzer, apply_sentiment_action
+from strategies.ai_briefing import AIBriefingAnalyzer
+from strategies.ai_factor_adjuster import AIFactorAdjuster
 from reports.daily_report import DailyReport
 
 
@@ -99,8 +101,19 @@ def analyze_stock(code: str, name: str, sector: str, fetcher: DataFetcher,
                   f_score: dict, engine: SignalEngineV2, risk_mgr: RiskManager,
                   config: dict, use_mock: bool = False,
                   moneyflow_df=None, top_list_df=None, top_inst_df=None,
-                  spot_row=None):
+                  spot_row=None, ai_signals: dict = None):
     """分析单只股票，返回完整结果（含一票否决信息）"""
+    # AI 基本面行业得分调整
+    if ai_signals:
+        from strategies.ai_factor_adjuster import AIFactorAdjuster
+        adjuster = AIFactorAdjuster(config)
+        original_score = f_score.get("score", 0)
+        new_score = adjuster.adjust_fundamental_score(original_score, sector, ai_signals)
+        f_score = dict(f_score)
+        f_score["score"] = new_score
+        if abs(new_score - original_score) > 0.001:
+            f_score.setdefault("signals", []).append("AI行业调整")
+
     # 获取历史数据
     hist = fetcher.get_hist_data(code, days=500, use_mock=use_mock)
 
@@ -303,6 +316,36 @@ def main(use_mock: bool = False):
     print(f"               基本面={weights['fundamental']:.0%} 技术面={weights['technical']:.0%} "
           f"动量={weights['momentum']:.0%} 资金面={weights['capital_flow']:.0%}")
 
+    # 0.5 AI 财经简报解读
+    print("\n[0.5/5] AI 财经简报解读...")
+    ai_signals = None
+    ai_adjuster = None
+    ai_cfg = config.get("ai_briefing", {})
+    if ai_cfg.get("enabled", False) and not use_mock:
+        try:
+            from utils.llm_client import LLMClient
+            llm_client = LLMClient.from_config(config)
+            ai_analyzer = AIBriefingAnalyzer(config, llm_client)
+            ai_signals = ai_analyzer.analyze(fetcher)
+            if ai_signals:
+                ai_adjuster = AIFactorAdjuster(config)
+                new_weights = ai_adjuster.adjust_weights(weights, ai_signals)
+                engine.set_weights(new_weights)
+                notes = ai_adjuster.get_macro_notes(ai_signals)
+                for note in notes:
+                    print(f"     {note}")
+                print(f"     [AI 动态权重] 基本面={new_weights['fundamental']:.0%} "
+                      f"技术面={new_weights['technical']:.0%} "
+                      f"动量={new_weights['momentum']:.0%} "
+                      f"资金面={new_weights['capital_flow']:.0%}")
+            else:
+                print("     [WARN] AI 简报分析未返回有效信号，使用默认权重")
+        except Exception as e:
+            print(f"     [WARN] AI 简报分析异常: {e}，使用默认权重")
+            ai_signals = None
+    else:
+        print(f"     {'[演示模式] 跳过' if use_mock else '未启用，跳过'}")
+
     # 1. 获取当日全市场数据
     print("\n[1/5] 获取全市场股票列表...")
     spot = fetcher.get_stock_list(use_mock=use_mock)
@@ -329,7 +372,7 @@ def main(use_mock: bool = False):
     print("\n[2/5] 基本面筛选...")
     screener = FundamentalScreener(spot, config)
     screener.set_pledge_data(pledge_df)
-    candidates = screener.screen()
+    candidates = screener.screen(ai_signals=ai_signals)
 
     if candidates.empty:
         print("没有符合条件的股票，退出")
@@ -438,13 +481,15 @@ def main(use_mock: bool = False):
             code = str(row["代码"])
             name = str(row.get("名称", ""))
             sector = str(row.get("所属行业", ""))
-            f_score = screener.score(row, financial_data=financial_data_map.get(code))
+            f_score = screener.score(row, financial_data=financial_data_map.get(code),
+                                      ai_signals=ai_signals)
             future = executor.submit(
                 analyze_stock, code, name, sector, fetcher,
                 f_score, engine, risk_mgr, config,
                 use_mock,
                 moneyflow_df, top_list_df, top_inst_df,
-                row  # 传入 spot row 以启用换手率评分
+                row,  # 传入 spot row 以启用换手率评分
+                ai_signals
             )
             futures[future] = code
 
@@ -482,6 +527,13 @@ def main(use_mock: bool = False):
             # 重新排序（降级后分数可能变化）
             results.sort(key=lambda x: x["total_score"], reverse=True)
 
+    # 5.2 AI 个股情绪叠加
+    if ai_adjuster and ai_signals and ai_signals.get("stock_mentions"):
+        n_overlay = ai_adjuster.apply_stock_sentiment_overlay(results, ai_signals)
+        if n_overlay > 0:
+            print(f"     AI 个股情绪叠加: {n_overlay} 只")
+            results.sort(key=lambda x: x["total_score"], reverse=True)
+
     print(f"     分析完成: 共 {len(results)} 只，一票否决 {veto_count} 只，数据异常 {data_invalid_count} 只")
 
     # 5.5 行业分散限制
@@ -517,13 +569,15 @@ def main(use_mock: bool = False):
 
     reporter.print_console(results_for_report, market_env,
                            avoid_list=avoid_list, veto_list=veto_list,
-                           pre_market_orders=pre_market_orders)
+                           pre_market_orders=pre_market_orders,
+                           ai_signals=ai_signals)
     filepath, content = reporter.generate_markdown(
         results_for_report, market_env,
         avoid_list=avoid_list, veto_list=veto_list,
         div_notes=div_notes,
         pre_market_orders=pre_market_orders,
-        sentiment_skipped=sentiment_skipped
+        sentiment_skipped=sentiment_skipped,
+        ai_signals=ai_signals
     )
     print(f"\n报告已保存: {filepath}")
 

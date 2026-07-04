@@ -466,3 +466,135 @@ report:
 schedule:
   pre_market_time: "09:00"
   post_market_time: "15:30"
+
+# ============================================================
+# AI 财经简报解读
+# ============================================================
+ai_briefing:
+  # 是否启用 AI 简报解读
+  enabled: true
+
+  # LLM 提供商: kimi / anthropic / openai / ollama
+  llm_provider: "kimi"
+
+  # 模型选择（按提供商）
+  # kimi: moonshot-v1-8k / moonshot-v1-32k / moonshot-v1-128k
+  # anthropic: claude-sonnet-4-6 / claude-opus-4-8 / claude-haiku-4-5
+  # openai: gpt-4o-mini / gpt-4o
+  # ollama: llama3.1 / qwen2.5 等本地模型
+  model: "moonshot-v1-32k"
+
+  # API Key 文件路径（相对项目根目录），留空则尝试环境变量
+  api_key_file: "config/.llm_api_key"
+
+  # OpenAI-compatible API base URL
+  api_base: "https://api.kimi.com/coding/v1/"
+
+  # LLM 调用参数
+  # 注意：部分特殊端点（如 kimi coding）只支持 temperature=1
+  temperature: 1.0
+  max_tokens: 4096
+
+  # 新闻源配置
+  news_sources:
+    # cls_alerts 财联社接口已在 akshare 新版下线，默认改用 em_global
+    primary: "em_global"       # 东方财富全球快讯
+    fallbacks:
+      - "sina_global"          # 新浪财经全球快讯
+      - "ths_live"             # 同花顺财经直播
+      - "futu_global"          # 富途牛牛全球快讯
+      - "cls_alerts"           # 财联社（兼容旧版 akshare）
+    max_items_per_source: 200
+    max_age_hours: 24
+    min_items_threshold: 20    # 低于此数量触发 fallback
+    max_briefing_chars: 50000  # 控制 LLM token 成本
+
+  # 因子调整配置
+  factor_adjustments:
+    enabled: true
+
+    # 权重调整上限（相对于基础权重）
+    weight_shift_cap: 0.15      # 单因子权重最多偏移 ±15%
+
+    # 宏观情绪对权重的映射
+    macro_weight_map:
+      bullish:          # 宏观情绪 > 0.3
+        fundamental: 0.05
+        technical: 0.05
+        momentum: 0.05
+        capital_flow: -0.05
+      bearish:          # 宏观情绪 < -0.3
+        fundamental: 0.05
+        technical: -0.05
+        momentum: -0.05
+        capital_flow: 0.05
+      neutral:          # -0.3 <= 宏观情绪 <= 0.3
+        fundamental: 0.0
+        technical: 0.0
+        momentum: 0.0
+        capital_flow: 0.0
+
+    # 风格偏好对权重的映射
+    style_weight_map:
+      growth:           # 成长风格
+        fundamental: -0.05
+        technical: 0.05
+        momentum: 0.10
+        capital_flow: 0.0
+      value:            # 价值风格
+        fundamental: 0.10
+        technical: -0.05
+        momentum: -0.05
+        capital_flow: 0.0
+      defensive:        # 防御风格
+        fundamental: 0.10
+        technical: -0.05
+        momentum: -0.10
+        capital_flow: 0.0
+      momentum:         # 动量风格
+        fundamental: -0.05
+        technical: 0.05
+        momentum: 0.15
+        capital_flow: 0.0
+      neutral:
+        fundamental: 0.0
+        technical: 0.0
+        momentum: 0.0
+        capital_flow: 0.0
+
+    # 基本面评分调整
+    fundamental:
+      # 热门行业加分
+      hot_sector_bonus: 0.10      # 0.0 ~ 1.0
+      # 冷门行业扣分
+      cold_sector_penalty: -0.10  # -1.0 ~ 0.0
+      # 政策主题加分（个股属于政策主题行业）
+      policy_theme_bonus: 0.08
+      # 风险事件扣分（个股属于风险事件相关行业）
+      risk_event_penalty: -0.15
+
+    # 个股情绪叠加（仅对明确提及的个股）
+    stock_sentiment:
+      enabled: true
+      # 正面提及加分
+      positive_bonus: 0.15
+      # 负面提及扣分
+      negative_penalty: -0.20
+      # 中性提及不调整
+      neutral_delta: 0.0
+
+    # AI 否决/回避规则
+    veto_rules:
+      enabled: true
+      # 宏观情绪极度悲观时提高筛选门槛（可扩展）
+      bearish_macro_filter: true
+      # 极度悲观阈值
+      bearish_macro_threshold: -0.6
+
+    # 最大调整幅度（防止过度拟合）
+    max_total_score_delta: 0.20   # 综合评分最多 ±0.20
+
+  # 报告输出
+  report:
+    include_ai_summary: true
+    include_ai_signals_table: true

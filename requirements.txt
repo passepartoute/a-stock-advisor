@@ -9,3 +9,6 @@ pandas>=2.0.0
 numpy>=1.24.0
 pyyaml>=6.0
 rich>=13.0.0
+# LLM SDK (Kimi uses OpenAI-compatible API; Anthropic optional)
+openai>=1.30.0
+# anthropic>=0.28.0
