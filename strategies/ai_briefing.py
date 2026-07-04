@@ -12,6 +12,7 @@ AI 财经简报解读器
 - 提示词要求只输出合法 JSON，便于解析。
 """
 import json
+import re
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -125,18 +126,38 @@ class AIBriefingAnalyzer:
             ai_cfg = self.config.get("ai_briefing", {})
             max_tokens = ai_cfg.get("max_tokens", 4096)
             temperature = ai_cfg.get("temperature", 0.3)
+            max_retries = ai_cfg.get("max_retries", 2)
 
-            raw = client.complete(
-                prompt=prompt,
-                system=system,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                output_schema=AI_BRIEFING_SCHEMA,
-            )
-            if raw is None:
+            parsed = None
+            last_raw = None
+            for attempt in range(max_retries + 1):
+                # 不通过 output_schema 让 LLMClient 解析，直接取原始文本自己处理，便于重试和调试
+                raw = client.complete(
+                    prompt=prompt,
+                    system=system,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                if raw:
+                    try:
+                        parsed = self._extract_json(raw)
+                        if parsed is not None:
+                            break
+                    except Exception as e:
+                        print(f"     [WARN] 第 {attempt+1} 次解析 JSON 失败: {e}")
+                    print(f"     [WARN] 第 {attempt+1} 次 LLM 返回非合法 JSON，长度={len(raw)}")
+                    last_raw = raw
+                else:
+                    print(f"     [WARN] 第 {attempt+1} 次 LLM 返回为空")
+                if attempt < max_retries:
+                    print(f"     [INFO] 正在第 {attempt+2} 次重试...")
+
+            if parsed is None:
+                print(f"     [WARN] AI 简报分析未返回有效信号，使用默认权重")
+                if last_raw:
+                    print(f"              最后原始内容: {last_raw[:200]!r}")
                 return None
 
-            parsed = json.loads(raw)
             return self._normalize(parsed)
         except Exception as e:
             print(f"     [WARN] AI 简报分析异常: {e}")
@@ -204,6 +225,29 @@ class AIBriefingAnalyzer:
             "- raw_summary: 给投资者看的自然语言摘要，200字以内\n\n"
             "注意：只输出合法 JSON，不要任何其他内容。"
         )
+
+    @staticmethod
+    def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+        """从 LLM 返回文本中提取 JSON 对象"""
+        if not text:
+            return None
+        text = text.strip()
+        # 去掉 Markdown 代码块
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # 尝试找第一个 { 和最后一个 }
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(text[start:end+1])
+                except json.JSONDecodeError:
+                    pass
+        return None
 
     def _normalize(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """规范化 LLM 输出，补全缺失字段并做简单校验"""

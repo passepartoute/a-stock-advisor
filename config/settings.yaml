@@ -479,10 +479,11 @@ ai_briefing:
 
   # 模型选择（按提供商）
   # kimi: moonshot-v1-8k / moonshot-v1-32k / moonshot-v1-128k
+  # kimi coding 端点通常使用: kimi-for-coding
   # anthropic: claude-sonnet-4-6 / claude-opus-4-8 / claude-haiku-4-5
   # openai: gpt-4o-mini / gpt-4o
   # ollama: llama3.1 / qwen2.5 等本地模型
-  model: "moonshot-v1-32k"
+  model: "kimi-for-coding"
 
   # API Key 文件路径（相对项目根目录），留空则尝试环境变量
   api_key_file: "config/.llm_api_key"
@@ -494,6 +495,7 @@ ai_briefing:
   # 注意：部分特殊端点（如 kimi coding）只支持 temperature=1
   temperature: 1.0
   max_tokens: 4096
+  max_retries: 2          # JSON 解析失败/返回空时重试次数
 
   # 新闻源配置
   news_sources:

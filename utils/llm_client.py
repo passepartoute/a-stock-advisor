@@ -206,8 +206,9 @@ class LLMClient:
             "temperature": temperature,
         }
         # 部分 OpenAI-compatible 接口支持 json_object，可提升 JSON 输出稳定性
-        if output_schema:
-            kwargs.setdefault("response_format", {"type": "json_object"})
+        # 但 kimi coding 端点对此支持不稳定，先默认不启用，后续可按需开启
+        # if output_schema:
+        #     kwargs.setdefault("response_format", {"type": "json_object"})
         response = client.chat.completions.create(**kwargs)
         if response.choices and response.choices[0].message:
             return response.choices[0].message.content
