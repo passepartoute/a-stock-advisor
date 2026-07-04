@@ -159,7 +159,7 @@ class LLMClient:
                 prompt = self._inject_json_schema(prompt, output_schema)
 
             if self.provider in ("kimi", "openai"):
-                raw = self._complete_openai(prompt, system, max_tokens, temperature)
+                raw = self._complete_openai(prompt, system, max_tokens, temperature, output_schema)
             elif self.provider == "anthropic":
                 raw = self._complete_anthropic(prompt, system, max_tokens, temperature)
             elif self.provider == "ollama":
@@ -173,7 +173,8 @@ class LLMClient:
             if output_schema:
                 parsed = self._extract_json(raw)
                 if parsed is None:
-                    print(f"     [WARN] LLM 返回非合法 JSON，尝试继续处理: {raw[:200]}")
+                    print(f"     [WARN] LLM 返回非合法 JSON（model={self.model}, base={self.api_base}）")
+                    print(f"              原始内容长度={len(raw)}, 前200字={raw[:200]!r}")
                     return None
                 return json.dumps(parsed, ensure_ascii=False)
             return raw
@@ -191,18 +192,23 @@ class LLMClient:
         return prompt + suffix
 
     def _complete_openai(self, prompt: str, system: str,
-                         max_tokens: int, temperature: float) -> Optional[str]:
+                         max_tokens: int, temperature: float,
+                         output_schema: Dict[str, Any] = None) -> Optional[str]:
         client = self._get_openai_client()
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        response = client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        # 部分 OpenAI-compatible 接口支持 json_object，可提升 JSON 输出稳定性
+        if output_schema:
+            kwargs.setdefault("response_format", {"type": "json_object"})
+        response = client.chat.completions.create(**kwargs)
         if response.choices and response.choices[0].message:
             return response.choices[0].message.content
         return None
