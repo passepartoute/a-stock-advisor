@@ -1,10 +1,34 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><title>A-Stock 报告</title></head>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A-Stock 报告</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; background: #f6f8fa; color: #1f2328; }
+    h1 { font-size: 1.6em; margin-bottom: 20px; }
+    table { border-collapse: collapse; width: 100%; background: #fff; }
+    th, td { border: 1px solid #d1d9e0; padding: 10px 12px; text-align: left; }
+    th { background: #f6f8fa; font-weight: 600; }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .footer { color: #656d76; font-size: 0.9em; margin-top: 24px; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0d1117; color: #c9d1d9; }
+      table { background: #161b22; }
+      th { background: #21262d; }
+      th, td { border-color: #30363d; }
+      a { color: #58a6ff; }
+    }
+  </style>
+</head>
 <body>
-<h1>A-Stock 每日选股报告</h1>
-<ul>
-<li><a href="report_2026-07-04.md">report_2026-07-04.md</a></li>
-</ul>
-<p>自动生成于 </p>
-</body></html>
+  <h1>A-Stock 每日选股报告</h1>
+  <table>
+    <tr><th>日期</th><th>类型</th><th>链接</th></tr>
+    <tr><td>2026-07-05</td><td>每日报告</td><td><a href="viewer.html?report=report_2026-07-05.md">report_2026-07-05.md</a></td></tr>
+    <tr><td>2026-07-04</td><td>每日报告</td><td><a href="viewer.html?report=report_2026-07-04.md">report_2026-07-04.md</a></td></tr>
+  </table>
+  <p class="footer">自动生成于 2026-07-05 10:16 UTC · 保留最近 7 天报告</p>
+</body>
+</html>
