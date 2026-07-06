@@ -1,9 +1,9 @@
 name: Generate A-Stock Report
 
 on:
-  # 每个 A 股交易日北京时间 09:00 自动生成日报（UTC 01:00，周一到周五）
+  # 每个 A 股交易日北京时间 08:40 自动生成日报（UTC 00:40，周一到周五）
   schedule:
-    - cron: '0 1 * * 1-5'
+    - cron: '40 0 * * 1-5'
 
   # 外部 API 触发（手机/网页/脚本）
   repository_dispatch:
