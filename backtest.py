@@ -290,6 +290,96 @@ class TushareBacktester:
 
         return filtered, dropped
 
+    def _compute_single_return(self, pick, date_str, next_date_str, eval_ts,
+                               use_weekly_hold, sl_mode, stop_loss_stats, valid_hists):
+        """计算单只入选股票在持有期内的净收益率（含交易成本与止损）"""
+        code = pick["code"]
+        hist = valid_hists.get(code)
+        if hist is None:
+            return None
+
+        entry_price = pick["entry_price"]
+        entry_cost = entry_price * (1 + self.commission_rate)
+
+        if use_weekly_hold:
+            next_ts = pd.Timestamp(next_date_str)
+            hold_period = hist[(hist["日期"] > pd.Timestamp(date_str)) & (hist["日期"] <= next_ts)]
+        else:
+            hold_period = hist[(hist["日期"] > pd.Timestamp(date_str)) & (hist["日期"] <= eval_ts)]
+
+        exit_price = None
+        exit_date = None
+        stop_triggered = False
+        stop_loss_price = None
+
+        if not hold_period.empty:
+            if sl_mode == "fixed":
+                stop_loss_price = entry_price * (1 + self.config.get("risk_management", {}).get("stop_loss_pct", -8.0) / 100)
+            elif sl_mode == "support_resistance":
+                hist_before_entry = hist[hist["日期"] <= pd.Timestamp(date_str)]
+                if not hist_before_entry.empty:
+                    sr = self.risk_mgr._calculate_support_resistance(hist_before_entry)
+                    if sr.get("support"):
+                        max_sl = entry_price * (1 + self.config.get("risk_management", {}).get("stop_loss_pct", -8.0) / 100)
+                        stop_loss_price = max(sr["support"], max_sl * 0.95)
+                    else:
+                        stop_loss_price = entry_price * (1 + self.config.get("risk_management", {}).get("stop_loss_pct", -8.0) / 100)
+
+            if stop_loss_price:
+                for _, day_row in hold_period.iterrows():
+                    day_low = day_row.get("最低", day_row["收盘"])
+                    if day_low <= stop_loss_price:
+                        exit_price = stop_loss_price
+                        exit_date = day_row["日期"]
+                        stop_triggered = True
+                        stop_loss_stats["triggered"] += 1
+                        final_row = hold_period.iloc[-1]
+                        no_sl_ret = (final_row["收盘"] - entry_price) / entry_price * 100
+                        sl_ret = (stop_loss_price - entry_cost) / entry_cost * 100
+                        if no_sl_ret < sl_ret:
+                            stop_loss_stats["saved"] += (sl_ret - no_sl_ret)
+                        break
+
+            if not stop_triggered:
+                final_row = hold_period.iloc[-1]
+                exit_price = float(final_row["收盘"])
+                exit_date = final_row["日期"]
+        else:
+            exit_price = entry_price
+            exit_date = pd.Timestamp(date_str)
+
+        if exit_price:
+            exit_revenue = exit_price * (1 - self.commission_rate - self.stamp_tax_rate)
+            net_ret = (exit_revenue - entry_cost) / entry_cost * 100
+            pick["exit_price"] = round(exit_price, 2)
+            pick["return_pct"] = round(net_ret, 2)
+            pick["exit_date"] = exit_date.strftime("%Y-%m-%d") if hasattr(exit_date, "strftime") else str(exit_date)
+            pick["stop_triggered"] = stop_triggered
+            if stop_triggered:
+                pick["stop_loss_price"] = round(stop_loss_price, 2)
+            return net_ret
+        return None
+
+    def _compute_period_portfolio_return(self, picks, all_daily_results):
+        """计算一期组合的平均收益（ATR倒数波动率加权，无ATR则等权）"""
+        if not picks:
+            return 0.0
+
+        atr_map = {}
+        for ap in all_daily_results:
+            code = ap.get("code", "")
+            atr = ap.get("details", {}).get("technical", {}).get("details", {}).get("atr")
+            if atr and atr > 0:
+                atr_map[code] = atr
+
+        if atr_map and len(atr_map) >= len(picks) * 0.5:
+            inv_atr = {p["code"]: 1.0 / atr_map.get(p["code"], 1) for p in picks}
+            total_inv = sum(inv_atr.values())
+            if total_inv > 0:
+                return sum(p.get("return_pct", 0) * inv_atr.get(p["code"], 0) / total_inv for p in picks)
+
+        return sum(p.get("return_pct", 0) for p in picks) / len(picks)
+
     def get_index_hist(self, days=400):
         """获取上证指数历史"""
         if self._index_cache is not None:
@@ -462,8 +552,12 @@ class TushareBacktester:
         print(f"     财务数据: {fin_count[0]}只 (PEG/ROE/毛利率等)")
 
         # 5. 逐期回测（P0-1：每期独立获取估值数据，消除未来数据泄漏）
-        print("\n[5/8] 运行回测分析（每期独立估值）...")
+        print("\n[5/8] 运行回测分析与收益计算（每期独立估值）...")
         all_results = {}
+        period_portfolio_returns = []          # 每期组合收益，用于连续亏损降仓
+        stop_loss_stats = {"triggered": 0, "saved": 0.0}
+        cl_cfg = self.config.get("backtest", {}).get("consecutive_loss_reduction", {})
+        cl_enabled = cl_cfg.get("enabled", False)
 
         for info in bt_info:
             date_str = info["date_str"]
@@ -485,6 +579,20 @@ class TushareBacktester:
                 market_env = {"above_ma250": None}
             weights = self.regime_detector.get_weights_for_env(market_env)
             self.engine.set_weights(weights)
+
+            # === 连续亏损降仓：根据前期收益调整本期选股数量 ===
+            effective_top_n = top_n
+            if cl_enabled and len(period_portfolio_returns) >= cl_cfg.get("threshold_consecutive_losses", 2):
+                threshold = cl_cfg.get("threshold_consecutive_losses", 2)
+                recent = period_portfolio_returns[-threshold:]
+                if all(r < 0 for r in recent):
+                    method = cl_cfg.get("reduction_method", "halve")
+                    min_n = cl_cfg.get("min_top_n", 1)
+                    if method == "max_1":
+                        effective_top_n = max(min_n, 1)
+                    else:  # halve
+                        effective_top_n = max(min_n, top_n // 2)
+                    print(f"  [连续亏损减仓] 近{threshold}期亏损，本期选股数降至 {effective_top_n}")
 
             # 获取该期之前最近的估值数据（P0-1 修复核心）
             period_trade_date = self._get_recent_trade_date_before(bt_ts)
@@ -550,7 +658,16 @@ class TushareBacktester:
                 daily_results.append(result)
 
             daily_results.sort(key=lambda x: x["total_score"], reverse=True)
-            filtered = [r for r in daily_results if r["advice"] in advice_filter]
+
+            # 方案A：年线下方时只选"强烈关注"，年线上方时正常交易
+            ma250_state = market_env.get("above_ma250")
+            if ma250_state is False:
+                period_advice_filter = ("强烈关注",)
+                print(f"  [市场环境] 大盘跌破年线，选股门槛升至: 强烈关注")
+            else:
+                period_advice_filter = advice_filter
+
+            filtered = [r for r in daily_results if r["advice"] in period_advice_filter]
 
             # 应用单行业持仓数量上限
             max_sector = self.config.get("position_management", {}).get("max_sector_holdings", 2)
@@ -562,99 +679,33 @@ class TushareBacktester:
                     dropped_str += f" 等{len(dropped)}只"
                 print(f"  行业限制: 从{filtered_before}只降至{len(filtered)}只 (排除{dropped_str})")
 
+            selected = filtered[:effective_top_n]
             all_results[date_str] = {
                 "all": daily_results,
-                "filtered": filtered[:top_n],
-                "next_date": info["next_date_str"]
+                "filtered": selected,
+                "next_date": info["next_date_str"],
+                "advice_filter": list(period_advice_filter),
+                "effective_top_n": effective_top_n
             }
 
             print(f"  估值日期: {period_trade_date}, 候选: {len(candidates)} 只")
             print(f"  分析: {len(daily_results)} 只 (跳过{skipped})")
-            print(f"  符合条件: {len(filtered)} 只, 取前 {min(top_n, len(filtered))} 只")
+            print(f"  符合条件: {len(filtered)} 只, 取前 {min(effective_top_n, len(filtered))} 只")
 
-        # 6. 计算收益率（P0-2 修复：加入交易成本 + P1-6 修复：止损逻辑）
-        print(f"\n[6/8] 计算收益率 ({mode_str})...")
+            # 立即计算本期收益（为下期连续亏损降仓提供输入）
+            for pick in selected:
+                self._compute_single_return(
+                    pick, date_str, info["next_date_str"], eval_ts,
+                    use_weekly_hold, sl_mode, stop_loss_stats, valid_hists
+                )
+            period_return = self._compute_period_portfolio_return(selected, daily_results)
+            period_portfolio_returns.append(period_return)
+            all_results[date_str]["portfolio_return"] = period_return
+
+        # 6. 收益汇总
+        print(f"\n[6/8] 收益汇总 ({mode_str})...")
         print(f"  成本模型: 买入+{self.commission_rate*10000:.2f}‰, 卖出+{(self.commission_rate+self.stamp_tax_rate)*10000:.2f}‰")
         print(f"  止损模式: {sl_mode}")
-
-        stop_loss_stats = {"triggered": 0, "saved": 0.0}  # 止损统计
-
-        for date_str, results in all_results.items():
-            for pick in results["filtered"]:
-                code = pick["code"]
-                hist = valid_hists.get(code)
-                if hist is None:
-                    continue
-
-                entry_price = pick["entry_price"]
-                # 买入成本价（含佣金）
-                entry_cost = entry_price * (1 + self.commission_rate)
-
-                if use_weekly_hold:
-                    next_date_str = results.get("next_date", eval_end_date.strftime("%Y-%m-%d"))
-                    next_ts = pd.Timestamp(next_date_str)
-                    hold_period = hist[(hist["日期"] > pd.Timestamp(date_str)) & (hist["日期"] <= next_ts)]
-                else:
-                    hold_period = hist[(hist["日期"] > pd.Timestamp(date_str)) & (hist["日期"] <= eval_ts)]
-
-                exit_price = None
-                exit_date = None
-                stop_triggered = False
-
-                if not hold_period.empty:
-                    # P1-6: 止损检查（逐日检查持有期间）
-                    stop_loss_price = None
-                    if sl_mode == "fixed":
-                        stop_loss_price = entry_price * (1 + self.config.get("risk_management", {}).get("stop_loss_pct", -8.0) / 100)
-                    elif sl_mode == "support_resistance":
-                        # 使用买入日之前的K线计算支撑位
-                        hist_before_entry = hist[hist["日期"] <= pd.Timestamp(date_str)]
-                        if not hist_before_entry.empty:
-                            sr = self.risk_mgr._calculate_support_resistance(hist_before_entry)
-                            if sr.get("support"):
-                                max_sl = entry_price * (1 + self.config.get("risk_management", {}).get("stop_loss_pct", -8.0) / 100)
-                                stop_loss_price = max(sr["support"], max_sl * 0.95)
-                            else:
-                                stop_loss_price = entry_price * (1 + self.config.get("risk_management", {}).get("stop_loss_pct", -8.0) / 100)
-
-                    if stop_loss_price:
-                        # 逐日检查是否触发止损
-                        for _, day_row in hold_period.iterrows():
-                            day_low = day_row.get("最低", day_row["收盘"])
-                            if day_low <= stop_loss_price:
-                                exit_price = stop_loss_price
-                                exit_date = day_row["日期"]
-                                stop_triggered = True
-                                stop_loss_stats["triggered"] += 1
-                                # 计算如果不止损的亏损（用于统计止损效果）
-                                final_row = hold_period.iloc[-1]
-                                no_sl_ret = (final_row["收盘"] - entry_price) / entry_price * 100
-                                sl_ret = (stop_loss_price - entry_cost) / entry_cost * 100
-                                if no_sl_ret < sl_ret:
-                                    stop_loss_stats["saved"] += (sl_ret - no_sl_ret)
-                                break
-
-                    # 未触发止损，用期末价格退出
-                    if not stop_triggered:
-                        final_row = hold_period.iloc[-1]
-                        exit_price = float(final_row["收盘"])
-                        exit_date = final_row["日期"]
-                else:
-                    # 无持有期数据，用买入价退出（无收益）
-                    exit_price = entry_price
-                    exit_date = pd.Timestamp(date_str)
-
-                # P0-2: 计算净收益率（扣除交易成本）
-                if exit_price:
-                    # 卖出收入（扣除佣金+印花税）
-                    exit_revenue = exit_price * (1 - self.commission_rate - self.stamp_tax_rate)
-                    net_ret = (exit_revenue - entry_cost) / entry_cost * 100
-                    pick["exit_price"] = round(exit_price, 2)
-                    pick["return_pct"] = round(net_ret, 2)
-                    pick["exit_date"] = exit_date.strftime("%Y-%m-%d") if hasattr(exit_date, "strftime") else str(exit_date)
-                    pick["stop_triggered"] = stop_triggered
-                    if stop_triggered:
-                        pick["stop_loss_price"] = round(stop_loss_price, 2)
 
         # 打印止损统计
         if stop_loss_stats["triggered"] > 0:
@@ -1176,6 +1227,14 @@ class TushareBacktester:
         period_label = f"{backtest_dates[0].strftime('%Y-%m-%d')} ~ {eval_ts.strftime('%Y-%m-%d')}"
         sl_mode = self.config.get("risk_management", {}).get("stop_loss_method", "support_resistance")
 
+        # 判断选股条件描述：是否使用了动态门槛
+        filter_desc = "强烈关注 / 关注"
+        if all_results:
+            filters = [r.get("advice_filter", ["强烈关注", "关注"]) for r in all_results.values()]
+            unique_filters = set(tuple(f) for f in filters)
+            if len(unique_filters) > 1 or list(unique_filters)[0] != ("强烈关注", "关注"):
+                filter_desc = '动态（大盘跌破年线时仅选"强烈关注"，否则"强烈关注"/"关注"）'
+
         lines = [
             f"# 策略回测报告 - {period_label}",
             "",
@@ -1193,7 +1252,7 @@ class TushareBacktester:
             f"- **回测周期**: {period_label}",
             f"- **回测期数**: {len(backtest_dates)} 期",
             f"- **回测日期**: {', '.join(d.strftime('%Y-%m-%d') for d in backtest_dates)}",
-            f"- **选股条件**: 强烈关注 / 关注",
+            f"- **选股条件**: {filter_desc}",
             f"- **交易成本**: 佣金{self.commission_rate*10000:.2f}‰(买卖双向) + 印花税{self.stamp_tax_rate*100:.1f}%(仅卖出)",
             f"- **止损模式**: {sl_mode}",
             "",
@@ -1569,6 +1628,8 @@ def main():
     parser.add_argument("--stop-loss-mode", type=str, default=None,
                         choices=["fixed", "support_resistance", "none"],
                         help="止损模式: fixed=固定比例(默认-8%%), support_resistance=支撑位, none=不止损")
+    parser.add_argument("--config", type=str, default="config/settings.yaml",
+                        help="配置文件路径 (默认: config/settings.yaml)")
     parser.add_argument("--demo", action="store_true",
                         help="使用模拟数据快速验证回测逻辑")
     args = parser.parse_args()
@@ -1584,7 +1645,7 @@ def main():
         eval_end = datetime.now()
 
     # 创建回测器
-    bt = TushareBacktester()
+    bt = TushareBacktester(config_path=args.config)
 
     # 确定回测日期
     if args.period:
