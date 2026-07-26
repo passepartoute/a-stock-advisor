@@ -287,9 +287,9 @@ signal_weights:
   #       资金面(IC+0.33)显著正向。提权技术面, 降权基本面。
   base:
     fundamental: 0.20
-    technical: 0.25
+    technical: 0.35
     momentum: 0.10
-    capital_flow: 0.45
+    capital_flow: 0.35
 
   # 动态权重：根据市场状态和个股趋势自动调整
   dynamic:
@@ -297,21 +297,21 @@ signal_weights:
     # 强势市场（大盘在年线之上）
     bull_trend:
       fundamental: 0.15
-      technical: 0.30
+      technical: 0.40
       momentum: 0.10
-      capital_flow: 0.45
+      capital_flow: 0.35
     # 弱势市场（大盘在年线之下）：资金面防御权重最高，动量几乎不参与
     bear_trend:
       fundamental: 0.25
-      technical: 0.20
+      technical: 0.30
       momentum: 0.05
-      capital_flow: 0.50
+      capital_flow: 0.40
     # 震荡/不明
     neutral:
       fundamental: 0.20
-      technical: 0.25
+      technical: 0.35
       momentum: 0.10
-      capital_flow: 0.45
+      capital_flow: 0.35
 
 # ============================================================
 # 一票否决规则（新增）

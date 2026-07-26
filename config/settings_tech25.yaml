@@ -116,11 +116,11 @@ market_cap:
 # 估值阈值
 valuation:
   # PE TTM 上限（0表示不限制）
-  max_pe: 50
+  max_pe: 100
   # PE 为负/亏损时是否排除
-  exclude_negative_pe: true
+  exclude_negative_pe: false
   # PB 上限
-  max_pb: 5
+  max_pb: 8
   # 股息率下限（%）
   min_dividend_yield: 0.5
   # 高股息加分阈值（%）

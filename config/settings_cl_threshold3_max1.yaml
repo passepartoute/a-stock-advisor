@@ -116,11 +116,11 @@ market_cap:
 # 估值阈值
 valuation:
   # PE TTM 上限（0表示不限制）
-  max_pe: 50
+  max_pe: 100
   # PE 为负/亏损时是否排除
-  exclude_negative_pe: true
+  exclude_negative_pe: false
   # PB 上限
-  max_pb: 5
+  max_pb: 8
   # 股息率下限（%）
   min_dividend_yield: 0.5
   # 高股息加分阈值（%）
@@ -287,9 +287,9 @@ signal_weights:
   #       资金面(IC+0.33)显著正向。提权技术面, 降权基本面。
   base:
     fundamental: 0.20
-    technical: 0.25
+    technical: 0.35
     momentum: 0.10
-    capital_flow: 0.45
+    capital_flow: 0.35
 
   # 动态权重：根据市场状态和个股趋势自动调整
   dynamic:
@@ -297,21 +297,21 @@ signal_weights:
     # 强势市场（大盘在年线之上）
     bull_trend:
       fundamental: 0.15
-      technical: 0.30
+      technical: 0.40
       momentum: 0.10
-      capital_flow: 0.45
+      capital_flow: 0.35
     # 弱势市场（大盘在年线之下）：资金面防御权重最高，动量几乎不参与
     bear_trend:
       fundamental: 0.25
-      technical: 0.20
+      technical: 0.30
       momentum: 0.05
-      capital_flow: 0.50
+      capital_flow: 0.40
     # 震荡/不明
     neutral:
       fundamental: 0.20
-      technical: 0.25
+      technical: 0.35
       momentum: 0.10
-      capital_flow: 0.45
+      capital_flow: 0.35
 
 # ============================================================
 # 一票否决规则（新增）
@@ -609,8 +609,8 @@ backtest:
   consecutive_loss_reduction:
     enabled: true
     # 连续亏损多少期后触发降仓
-    threshold_consecutive_losses: 2
+    threshold_consecutive_losses: 3
     # 降仓方式: halve(减半) / max_1(最多1只)
-    reduction_method: halve
+    reduction_method: max_1
     # 降仓后最少选股数
     min_top_n: 1

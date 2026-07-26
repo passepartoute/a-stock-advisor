@@ -580,6 +580,37 @@ class TushareBacktester:
             weights = self.regime_detector.get_weights_for_env(market_env)
             self.engine.set_weights(weights)
 
+            # 方案A：年线下方时只选"强烈关注"，年线上方时正常交易
+            ma250_state = market_env.get("above_ma250")
+            if ma250_state is False:
+                period_advice_filter = ("强烈关注",)
+                print(f"  [市场环境] 大盘跌破年线，选股门槛升至: 强烈关注")
+            else:
+                period_advice_filter = advice_filter
+
+            # 大盘动量过滤：上证20日跌幅过大且跌破年线时，空仓避险
+            momentum_cfg = self.config.get("market_environment", {}).get("momentum_filter", {})
+            if momentum_cfg.get("enabled", False):
+                if not sh_bt.empty and len(sh_bt) >= 20:
+                    latest_close_mm = float(sh_bt.iloc[-1]["收盘"])
+                    sh_20d_ago = float(sh_bt.iloc[-20]["收盘"])
+                    sh_20d_drop = (latest_close_mm - sh_20d_ago) / sh_20d_ago * 100
+                    drop_threshold = momentum_cfg.get("sh_index_20d_drop_pct", -5.0)
+                    require_below_ma250 = momentum_cfg.get("require_below_ma250", True)
+                    if sh_20d_drop <= drop_threshold and (not require_below_ma250 or ma250_state is False):
+                        print(f"  [大盘动量过滤] 上证20日跌幅{sh_20d_drop:.2f}%{'且跌破年线' if require_below_ma250 else ''}，本期空仓避险")
+                        all_results[date_str] = {
+                            "all": [],
+                            "filtered": [],
+                            "next_date": info["next_date_str"],
+                            "advice_filter": list(period_advice_filter),
+                            "effective_top_n": 0,
+                            "portfolio_return": 0.0,
+                            "market_momentum_skip": True
+                        }
+                        period_portfolio_returns.append(0.0)
+                        continue
+
             # === 连续亏损降仓：根据前期收益调整本期选股数量 ===
             effective_top_n = top_n
             if cl_enabled and len(period_portfolio_returns) >= cl_cfg.get("threshold_consecutive_losses", 2):
@@ -658,14 +689,6 @@ class TushareBacktester:
                 daily_results.append(result)
 
             daily_results.sort(key=lambda x: x["total_score"], reverse=True)
-
-            # 方案A：年线下方时只选"强烈关注"，年线上方时正常交易
-            ma250_state = market_env.get("above_ma250")
-            if ma250_state is False:
-                period_advice_filter = ("强烈关注",)
-                print(f"  [市场环境] 大盘跌破年线，选股门槛升至: 强烈关注")
-            else:
-                period_advice_filter = advice_filter
 
             filtered = [r for r in daily_results if r["advice"] in period_advice_filter]
 
