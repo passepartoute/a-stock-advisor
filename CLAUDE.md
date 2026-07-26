@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A-stock-advisor is an A-share (Chinese stock market) multi-factor quantitative investment strategy system. It combines fundamental screening (25%), technical analysis (40%), momentum (10%), and capital flow (25%) to generate daily stock picks with risk management and equity pledge avoidance.
+A-stock-advisor is an A-share (Chinese stock market) multi-factor quantitative investment strategy system. It combines fundamental screening (20%), technical analysis (25%), momentum (10%), and capital flow (45%) to generate daily stock picks with risk management and equity pledge avoidance.
 
 Data sources: akshare (primary), tushare Pro (fallback), mock data (last resort). The system auto-degrades through sources if one fails.
 
@@ -123,26 +123,26 @@ mypy .
 - **Test runner**: `run_tests.py` discovers and runs the stdlib `unittest` suite under `tests/`. `requirements-dev.txt` also lists `pytest`, but the active runner is `unittest`. Run a single file with `python -m unittest tests.test_<name> -v`.
 - **News/sentiment data sources**: `akshare.stock_news_em` provides media news (market hotspots, broker comments); `tushare.pro.anns_d` provides official exchange announcements (regulatory inquiries, earnings warnings). Use `news_sentiment.data_source: auto` to merge both. Demo mode skips sentiment fetching.
 - **News/sentiment in backtests**: Historical news sentiment is not currently backfilled, so backtests do not apply the sentiment veto layer. It is active only in live runs (`main.py`) by design, to avoid look-ahead bias.
-- **Capital flow in backtests**: Historical moneyflow/top_list data is not available, so backtests only use turnover rate + volume ratio for capital_flow scoring (25% weight). Live runs (`main.py`) include full moneyflow/top_list/inst data when available.
+- **Capital flow in backtests**: Historical moneyflow/top_list data is not available, so backtests only use turnover rate + volume ratio for capital_flow scoring (45% weight). Live runs (`main.py`) include full moneyflow/top_list/inst data when available.
 - **Pledge data in backtests**: Uses latest pledge data as approximation for historical periods. Pledge ratios change slowly, so this is reasonable for short-term backtests.
 - **AI briefing fallback**: The AI briefing layer is optional. If the LLM call fails, the API key is missing, or the response cannot be parsed, `main.py` falls back to the pure quant pipeline.
 - **AI briefing in backtests**: The AI briefing layer is not backfilled and is disabled in `backtest.py` to avoid look-ahead bias.
 
-## Strategy Performance (2026-06 latest)
+## Strategy Performance (2026-07 latest)
 
-6-month backtest (2025-12 ~ 2026-06, weekly rotation):
+6-month backtest (2026-01 ~ 2026-07, weekly rotation):
 
 | Metric | Value |
 |--------|-------|
-| Cumulative Return | +41.5% |
-| Excess vs SSE | +45.1% |
-| Max Drawdown | 5.3% |
-| Sharpe Ratio | 2.49 |
-| Sortino Ratio | 13.6 |
-| Calmar Ratio | 17.4 |
-| Win Rate | 46% |
-| Beta | 0.36 |
-| Info Ratio | 2.70 |
+| Cumulative Return | +45.0% |
+| Excess vs SSE | +51.3% |
+| Max Drawdown | 5.1% |
+| Sharpe Ratio | 4.82 |
+| Sortino Ratio | 12.28 |
+| Calmar Ratio | 58.3 |
+| Win Rate | 75% |
+| Beta | 1.83 |
+| Info Ratio | 5.75 |
 
 ## Confirmed Improvements (v2.4)
 
@@ -152,6 +152,7 @@ mypy .
 | P1-1 | Trend filter (MA60/MA250 penalty) | signal_engine_v2.py, technical.py | Prevents catching falling knives, Beta 0.36 |
 | P1-2 | Volatility variable scope fix | signal_engine_v2.py | Fixes UnboundLocalError risk |
 | — | Momentum 15%→10%, technical 35%→40% | settings.yaml, market_regime.py | IC-driven weight optimization |
+| — | Technical 40%→25%, capital_flow 25%→45%; valuation tighten (PE 100→50, PB 8→5) | settings.yaml | Further IC-driven optimization: +45.0% / 5.1% max drawdown |
 | P2 | Volume-price confirmation | technical.py | 放量+涨=做多, 放量+跌=出货 |
 | P6 | Pre-market news/sentiment veto layer | strategies/news_sentiment.py, utils/data_fetcher.py, main.py, reports/daily_report.py | Adds overnight news, comment sentiment, broker ratings as a pre-market filter; supports akshare media news + tushare `anns_d` official announcements |
 | P3 | Delete old SignalEngine v1 | signal_engine.py (deleted) | Code cleanup |
