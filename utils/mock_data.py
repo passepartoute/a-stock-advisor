@@ -7,6 +7,11 @@ import numpy as np
 from datetime import datetime, timedelta
 import os
 
+# A+H 溢价映射样本（用于 mock）
+_AH_UNDERLYING_CODES = ["600000", "600028", "600036", "601398", "601857", "601988", "601318", "600030"]
+_CB_UNDERLYING_CODES = ["600000", "600036", "601398", "000001", "000002", "000063", "002142", "600009"]
+
+
 def generate_mock_spot(n_stocks: int = 200) -> pd.DataFrame:
     """生成模拟的全市场快照数据"""
     np.random.seed(42)
@@ -29,6 +34,11 @@ def generate_mock_spot(n_stocks: int = 200) -> pd.DataFrame:
         price = max(1, np.random.lognormal(2.5, 0.8))
         turnover = np.random.exponential(2)
 
+        # A/H 溢价：仅对部分 A+H 公司赋值
+        ah_premium = None
+        if code in _AH_UNDERLYING_CODES:
+            ah_premium = round(np.random.uniform(5, 120), 2)
+
         data.append({
             "代码": code,
             "名称": f"模拟股票{i+1}",
@@ -47,7 +57,8 @@ def generate_mock_spot(n_stocks: int = 200) -> pd.DataFrame:
             "昨收": price * 0.995,
             "收盘价": price,
             "成交量": cap / price * turnover / 100,
-            "成交额": cap * turnover / 100
+            "成交额": cap * turnover / 100,
+            "AH溢价率": ah_premium
         })
 
     return pd.DataFrame(data)
@@ -83,6 +94,47 @@ def generate_mock_hist(days: int = 300, trend: str = "up") -> pd.DataFrame:
         "涨跌幅": np.round(np.diff(close, prepend=close[0]) / close * 100, 2),
         "涨跌额": np.round(np.diff(close, prepend=close[0]), 2)
     })
+
+
+def generate_mock_ah_premium(n_stocks: int = 50) -> pd.DataFrame:
+    """生成模拟 A/H 溢价数据"""
+    np.random.seed(44)
+    data = []
+    for i, code in enumerate(_AH_UNDERLYING_CODES[:n_stocks]):
+        a_price = round(np.random.uniform(5, 100), 2)
+        h_price = round(a_price / np.random.uniform(1.05, 2.2), 2)
+        premium = round((a_price / h_price - 1) * 100, 2)
+        data.append({
+            "代码": code,
+            "名称": f"AH模拟{i+1}",
+            "A股价格": a_price,
+            "H股价格": h_price,
+            "AH溢价率": premium
+        })
+    return pd.DataFrame(data)
+
+
+def generate_mock_cb_data(n_bonds: int = 30) -> pd.DataFrame:
+    """生成模拟可转债数据"""
+    np.random.seed(45)
+    data = []
+    codes = _CB_UNDERLYING_CODES[:n_bonds]
+    for i, stock_code in enumerate(codes):
+        bond_code = f"{110000 + i:06d}"
+        bond_price = round(np.random.uniform(90, 140), 2)
+        conversion_value = round(np.random.uniform(70, 130), 2)
+        # 转股溢价率 = 转债价格 / 转股价值 - 1
+        premium = round((bond_price / conversion_value - 1) * 100, 2)
+        data.append({
+            "正股代码": stock_code,
+            "转债代码": bond_code,
+            "转债名称": f"模拟转债{i+1}",
+            "转股溢价率": premium,
+            "转股价值": conversion_value,
+            "转债价格": bond_price,
+            "转债成交额": round(np.random.lognormal(15, 0.8), 2)
+        })
+    return pd.DataFrame(data)
 
 
 def save_mock_data(output_dir="data"):

@@ -381,9 +381,10 @@ class SignalEngineV2:
         }
 
     def combine(self, fundamental: Dict, technical: Dict, momentum: Dict,
-                capital_flow: Dict = None) -> Dict:
+                capital_flow: Dict = None, aux_signal: Dict = None) -> Dict:
         """
         加权综合评分、一票否决、信号冲突处理、建议等级
+        aux_signal: 可选辅助信号，目前用于可转债确认信号
         """
         cf = capital_flow or {"score": 0, "signals": [], "details": {}}
 
@@ -441,6 +442,24 @@ class SignalEngineV2:
 
         if below_ma250 and r20 < -5 and r60 < -10:
             total -= 0.10  # 叠加惩罚：年线下方且短中期均走弱
+
+        # 可转债辅助确认信号（可选）
+        cb_cfg = self.config.get("convertible_bond", {})
+        if cb_cfg.get("enabled", False) and aux_signal:
+            cb_premium = aux_signal.get("cb_premium")
+            if cb_premium is not None:
+                low_threshold = cb_cfg.get("low_premium_threshold", -2.0)
+                high_threshold = cb_cfg.get("high_premium_threshold", 80.0)
+                score_cap = cb_cfg.get("score_cap", 0.08)
+
+                if cb_premium <= low_threshold:
+                    # 负溢价或极低溢价，债股共振，小幅加分
+                    bonus = min(score_cap, score_cap * abs(cb_premium - low_threshold) / max(abs(low_threshold), 1.0))
+                    total += bonus
+                elif cb_premium >= high_threshold:
+                    # 溢价率过高，股债脱钩或转债情绪过热，小幅扣分
+                    penalty = min(score_cap, score_cap * (cb_premium - high_threshold) / 20.0)
+                    total -= penalty
 
         total = round(max(-1, min(1, total)), 3)
 

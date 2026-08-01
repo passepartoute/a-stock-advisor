@@ -110,9 +110,9 @@ jobs:
           cp -f viewer.html _site/viewer.html
           touch _site/.nojekyll
 
-      - name: Prune reports older than 7 days
+      - name: Prune reports older than 30 days
         run: |
-          CUTOFF=$(date -u -d '7 days ago' +%Y-%m-%d)
+          CUTOFF=$(date -u -d '30 days ago' +%Y-%m-%d)
           echo "Cutoff date: $CUTOFF"
           for f in _site/*.md; do
             [ -e "$f" ] || continue
@@ -133,7 +133,7 @@ jobs:
 
       - name: Generate Pages index
         run: |
-          python3 .github/scripts/generate_pages_index.py _site --days 7
+          python3 .github/scripts/generate_pages_index.py _site --days 30
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4

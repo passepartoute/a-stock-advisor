@@ -236,11 +236,12 @@ class FundamentalScreener:
         return df.reset_index(drop=True)
 
     def score(self, stock_row: pd.Series, financial_data: dict = None,
-              ai_signals: dict = None) -> dict:
+              ai_signals: dict = None, ah_premium_map: dict = None) -> dict:
         """
         对单只股票基本面打分 -1 ~ 1
         financial_data: 预留，Phase 2 传入详细财务指标
         ai_signals: AI 简报提取的宏观信号，用于行业加分/扣分
+        ah_premium_map: A/H 溢价映射 {code: premium_pct}
         """
         score = 0.0
         signals = []
@@ -346,7 +347,28 @@ class FundamentalScreener:
                 score -= 0.08
                 signals.append("PE处于历史高位")
 
-        # ---------- 8. 财务数据评分（预留）----------
+        # ---------- 8. A/H 股溢价评分（可选跨市场估值锚）----------
+        ah_cfg = self.config.get("ah_premium", {})
+        if ah_cfg.get("enabled", False) and ah_premium_map:
+            code = str(stock_row.get("代码", ""))
+            premium = ah_premium_map.get(code)
+            if premium is not None:
+                high_threshold = ah_cfg.get("high_premium_threshold", 80.0)
+                low_threshold = ah_cfg.get("low_premium_threshold", 20.0)
+                score_cap = ah_cfg.get("score_cap", 0.10)
+
+                if premium <= low_threshold:
+                    # 溢价率低或折价，A 股相对 H 股不贵，加分
+                    bonus = min(score_cap, score_cap * (1 - premium / low_threshold))
+                    score += bonus
+                    signals.append(f"AH溢价低{premium:.1f}%")
+                elif premium >= high_threshold:
+                    # 溢价率过高，A 股相对 H 股偏贵，扣分
+                    penalty = min(score_cap, score_cap * (premium / high_threshold - 1))
+                    score -= penalty
+                    signals.append(f"AH溢价高{premium:.1f}%")
+
+        # ---------- 9. 财务数据评分（预留）----------
         if financial_data:
             roe = financial_data.get("roe", 0)
             gm = financial_data.get("gross_margin", 0)
@@ -380,7 +402,7 @@ class FundamentalScreener:
                 score -= 0.05
                 signals.append(f"筹码分散{holder_change:+.1f}%")
 
-        # ---------- 9. AI 行业信号调整 ----------
+        # ---------- 10. AI 行业信号调整 ----------
         if ai_signals:
             adjuster = AIFactorAdjuster(self.config)
             original_score = score

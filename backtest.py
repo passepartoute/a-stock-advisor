@@ -26,6 +26,7 @@ from strategies.technical import TechnicalAnalyzer
 from strategies.signal_engine_v2 import SignalEngineV2
 from strategies.market_regime import MarketRegimeDetector
 from strategies.risk_manager import RiskManager
+from utils.data_fetcher import DataFetcher
 
 
 class TushareBacktester:
@@ -47,6 +48,10 @@ class TushareBacktester:
         self.regime_detector = MarketRegimeDetector(self.config)
         self.risk_mgr = RiskManager(self.config.get("risk_management"))
 
+        # 辅助数据 fetcher（用于 A/H 溢价、可转债等跨市场数据）
+        data_source = self.config.get("data_source", "auto")
+        self._aux_fetcher = DataFetcher(data_source=data_source)
+
         # 缓存
         self._hist_cache = {}
         self._index_cache = None
@@ -54,6 +59,8 @@ class TushareBacktester:
         self._pledge_cache = None
         self._basics_cache = None          # 股票基本信息缓存（P0-1 修复）
         self._daily_basic_cache = {}       # 按日期缓存 daily_basic（P0-1 修复）
+        self._ah_premium_cache = None
+        self._cb_data_cache = None
 
         # 交易成本（P0-2 修复）
         self.commission_rate = 0.00015     # 佣金万1.5，买卖双向
@@ -83,6 +90,22 @@ class TushareBacktester:
         except Exception as e:
             print(f"  [WARN] 股权质押数据获取失败: {e}")
         return pd.DataFrame()
+
+    def get_ah_premium_data(self, use_mock: bool = False):
+        """获取 A/H 溢价数据（回测使用最新数据近似历史）"""
+        if self._ah_premium_cache is not None:
+            return self._ah_premium_cache
+        df = self._aux_fetcher.get_ah_premium_data(use_mock=use_mock)
+        self._ah_premium_cache = df
+        return df
+
+    def get_cb_data(self, use_mock: bool = False):
+        """获取可转债数据（回测使用最新数据近似历史）"""
+        if self._cb_data_cache is not None:
+            return self._cb_data_cache
+        df = self._aux_fetcher.get_cb_data(use_mock=use_mock)
+        self._cb_data_cache = df
+        return df
 
     def _get_recent_trade_date_before(self, target_date, days_back=10):
         """获取 target_date 之前最近的交易日（P0-1 修复：消除未来数据泄漏）"""
@@ -458,6 +481,50 @@ class TushareBacktester:
         else:
             print("  [WARN] 股权质押数据获取失败，跳过质押检测")
 
+        # 2.5 获取 A/H 溢价与可转债数据（可选增强因子，回测使用最新数据近似历史）
+        print("\n[2.5/8] 获取 A/H 溢价与可转债数据...")
+        ah_cfg = self.config.get("ah_premium", {})
+        cb_cfg = self.config.get("convertible_bond", {})
+        ah_premium_map = {}
+        cb_map = {}
+
+        if ah_cfg.get("enabled", False):
+            try:
+                ah_df = self.get_ah_premium_data(use_mock=False)
+                if not ah_df.empty:
+                    ah_premium_map = {
+                        str(row.get("代码", "")).strip(): float(row.get("AH溢价率", 0))
+                        for _, row in ah_df.iterrows()
+                    }
+                    print(f"  A/H 溢价: {len(ah_premium_map)} 只")
+                else:
+                    print("  [WARN] A/H 溢价数据不可用，跳过")
+            except Exception as e:
+                print(f"  [WARN] A/H 溢价获取异常: {e}，跳过")
+        else:
+            print("  未启用 A/H 溢价因子")
+
+        if cb_cfg.get("enabled", False):
+            try:
+                cb_df = self.get_cb_data(use_mock=False)
+                if not cb_df.empty:
+                    cb_map = {
+                        str(row.get("正股代码", "")).strip(): {
+                            "转债代码": str(row.get("转债代码", "")).strip(),
+                            "转股溢价率": float(row.get("转股溢价率", 0)),
+                            "转股价值": float(row.get("转股价值", 0)),
+                            "转债价格": float(row.get("转债价格", 0)),
+                        }
+                        for _, row in cb_df.iterrows()
+                    }
+                    print(f"  可转债: {len(cb_map)} 只")
+                else:
+                    print("  [WARN] 可转债数据不可用，跳过")
+            except Exception as e:
+                print(f"  [WARN] 可转债获取异常: {e}，跳过")
+        else:
+            print("  未启用可转债因子")
+
         # 3. 获取期初估值数据，做宽松筛选获取K线范围（P0-1：用期初数据而非期末）
         print("\n[3/8] 获取期初估值数据（宽松筛选，用于预取K线）...")
         initial_trade_date = self._get_recent_trade_date_before(backtest_dates[0])
@@ -662,8 +729,12 @@ class TushareBacktester:
                     skipped += 1
                     continue
 
-                # 基本面评分（使用本期估值数据 + 财务数据）
-                f_score = screener.score(row, financial_data=financial_data_map.get(code))
+                # 基本面评分（使用本期估值数据 + 财务数据 + A/H 溢价）
+                f_score = screener.score(
+                    row,
+                    financial_data=financial_data_map.get(code),
+                    ah_premium_map=ah_premium_map
+                )
 
                 # 技术面分析
                 tech = TechnicalAnalyzer(hist_bt, self.config.get("technical")).score()
@@ -678,8 +749,12 @@ class TushareBacktester:
                     moneyflow_df=None, top_list_df=None, top_inst_df=None
                 )
 
+                # 可转债辅助信号
+                cb_info = cb_map.get(code, {})
+                aux_signal = {"cb_premium": cb_info.get("转股溢价率")} if cb_info else None
+
                 # 综合评分（v2: 含一票否决、信号冲突处理）
-                result = self.engine.combine(f_score, tech, momentum, capital)
+                result = self.engine.combine(f_score, tech, momentum, capital, aux_signal=aux_signal)
                 result["code"] = code
                 result["name"] = str(row.get("名称", ""))
                 result["sector"] = str(row.get("所属行业", ""))
@@ -1551,6 +1626,22 @@ def run_demo_backtest():
     candidates = screener.screen()
     print(f"  通过基本面筛选: {len(candidates)} 只")
 
+    # 生成模拟 A/H 溢价与可转债数据
+    from utils.mock_data import generate_mock_ah_premium, generate_mock_cb_data
+    ah_df = generate_mock_ah_premium()
+    cb_df = generate_mock_cb_data()
+    ah_premium_map = {
+        str(row.get("代码", "")).strip(): float(row.get("AH溢价率", 0))
+        for _, row in ah_df.iterrows()
+    }
+    cb_map = {
+        str(row.get("正股代码", "")).strip(): {
+            "转股溢价率": float(row.get("转股溢价率", 0)),
+        }
+        for _, row in cb_df.iterrows()
+    }
+    print(f"  模拟 A/H 溢价: {len(ah_premium_map)} 只，可转债: {len(cb_map)} 只")
+
     backtest_dates = pd.to_datetime(["2026-05-06", "2026-05-13", "2026-05-20", "2026-05-27"])
     eval_end = datetime(2026, 6, 6)
     engine = SignalEngineV2(config)
@@ -1571,12 +1662,16 @@ def run_demo_backtest():
             if len(hist_bt) < 60:
                 continue
 
-            f_score = screener.score(row, financial_data=None)  # demo: 无财务数据
+            f_score = screener.score(
+                row, financial_data=None, ah_premium_map=ah_premium_map
+            )  # demo: 无财务数据
             tech = TechnicalAnalyzer(hist_bt, config.get("technical")).score()
             momentum = engine.calculate_momentum(hist_bt)
             capital = engine.calculate_capital_flow(code, row,
                 moneyflow_df=None, top_list_df=None, top_inst_df=None)
-            result = engine.combine(f_score, tech, momentum, capital)
+            cb_info = cb_map.get(code, {})
+            aux_signal = {"cb_premium": cb_info.get("转股溢价率")} if cb_info else None
+            result = engine.combine(f_score, tech, momentum, capital, aux_signal=aux_signal)
             result["code"] = code
             result["name"] = str(row.get("名称", ""))
             result["sector"] = str(row.get("所属行业", ""))

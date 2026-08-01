@@ -39,6 +39,9 @@ class DataFetcher:
         self._rating_cache = {}
         # 每日财经简报缓存
         self._daily_briefing_cache = None
+        # A/H 溢价与可转债数据缓存
+        self._ah_premium_cache = None
+        self._cb_data_cache = None
 
     def _load_tushare_token(self):
         """从本地文件加载 tushare token"""
@@ -579,6 +582,273 @@ class DataFetcher:
         if not high.empty and "代码" in high.columns:
             high = high.sort_values("质押比例", ascending=False).reset_index(drop=True)
         return high
+
+    # ==================== A/H 溢价数据 ====================
+
+    def get_ah_premium_data(self, use_mock: bool = False) -> pd.DataFrame:
+        """
+        获取 A/H 股溢价数据（akshare 主，mock 兜底）
+        返回: DataFrame[代码, 名称, A股价格, H股价格, AH溢价率]
+        """
+        if self._ah_premium_cache is not None:
+            return self._ah_premium_cache
+
+        if use_mock or self.data_source == "mock":
+            return self._get_mock_ah_premium_data()
+
+        try:
+            df = ak.stock_zh_ah_spot_em()
+            if df is not None and not df.empty:
+                # 列名映射（不同 akshare 版本字段名可能不同）
+                rename_map = {}
+                code_candidates = ["代码", "股票代码", "code", "symbol"]
+                name_candidates = ["名称", "股票简称", "name"]
+                a_price_candidates = ["A股最新价", "A股价格", "a_price", "最新价"]
+                h_price_candidates = ["H股最新价", "H股价格", "h_price"]
+                premium_candidates = ["溢价率", "AH溢价率", "A股/H股", "溢价", "premium"]
+
+                for c in code_candidates:
+                    if c in df.columns and "代码" not in df.columns and "代码" not in rename_map.values():
+                        rename_map[c] = "代码"
+                        break
+                for c in name_candidates:
+                    if c in df.columns and "名称" not in df.columns and "名称" not in rename_map.values():
+                        rename_map[c] = "名称"
+                        break
+                for c in a_price_candidates:
+                    if c in df.columns and "A股价格" not in df.columns and "A股价格" not in rename_map.values():
+                        rename_map[c] = "A股价格"
+                        break
+                for c in h_price_candidates:
+                    if c in df.columns and "H股价格" not in df.columns and "H股价格" not in rename_map.values():
+                        rename_map[c] = "H股价格"
+                        break
+                for c in premium_candidates:
+                    if c in df.columns and "AH溢价率" not in df.columns and "AH溢价率" not in rename_map.values():
+                        rename_map[c] = "AH溢价率"
+                        break
+
+                df = df.rename(columns=rename_map)
+                # 如果溢价率列名为 A股/H股 比值，需转换为溢价率百分比
+                if "AH溢价率" not in df.columns and "A股价格" in df.columns and "H股价格" in df.columns:
+                    df["AH溢价率"] = (df["A股价格"] / df["H股价格"].replace(0, np.nan) - 1) * 100
+
+                keep = [c for c in ["代码", "名称", "A股价格", "H股价格", "AH溢价率"] if c in df.columns]
+                if not keep or "代码" not in keep or "AH溢价率" not in keep:
+                    print("     [WARN] A/H 溢价数据字段缺失，跳过")
+                    self._ah_premium_cache = pd.DataFrame()
+                    return self._ah_premium_cache
+
+                df = df[keep].copy()
+                df["代码"] = df["代码"].astype(str).str.strip()
+                df["AH溢价率"] = pd.to_numeric(df["AH溢价率"], errors="coerce").fillna(0)
+                self._ah_premium_cache = df
+                return df
+        except Exception as e:
+            print(f"     [WARN] A/H 溢价数据获取失败: {e}")
+            # Fallback：通过 H 股 spot + A 股 spot 按名称匹配估算
+            try:
+                return self._get_ah_premium_fallback()
+            except Exception as fallback_e:
+                print(f"     [WARN] A/H 溢价 fallback 也失败: {fallback_e}")
+
+        self._ah_premium_cache = pd.DataFrame()
+        return self._ah_premium_cache
+
+    def _get_ah_premium_fallback(self) -> pd.DataFrame:
+        """
+        当 stock_zh_ah_spot_em 不可用时，用 H 股 spot 与 A 股 spot 按名称匹配估算 A/H 溢价。
+        返回 DataFrame[代码, 名称, A股价格, H股价格, AH溢价率]
+        """
+        # H 股数据
+        h_df = ak.stock_zh_ah_spot()
+        if h_df is None or h_df.empty or "名称" not in h_df.columns or "最新价" not in h_df.columns:
+            return pd.DataFrame()
+
+        # A 股数据（复用已有接口）
+        a_df = self.get_stock_list()
+        if a_df is None or a_df.empty or "名称" not in a_df.columns or "收盘价" not in a_df.columns:
+            return pd.DataFrame()
+
+        # 构建 A 股名称索引（去掉常见后缀，便于匹配）
+        a_names = {}
+        for _, row in a_df.iterrows():
+            name = str(row.get("名称", "")).strip()
+            code = str(row.get("代码", "")).strip()
+            price = float(row.get("收盘价", 0) or 0)
+            if name and code and price > 0:
+                a_names[name] = (code, price)
+                # 也去后缀版本
+                for suffix in ["A", "B", "股份", "集团", "控股", "有限"]:
+                    clean = name.rstrip(suffix)
+                    if clean and clean not in a_names:
+                        a_names[clean] = (code, price)
+
+        results = []
+        for _, row in h_df.iterrows():
+            h_name = str(row.get("名称", "")).strip()
+            h_price = float(row.get("最新价", 0) or 0)
+            if not h_name or h_price <= 0:
+                continue
+
+            # 尝试直接匹配或去掉 H 股后缀后匹配
+            matched = None
+            if h_name in a_names:
+                matched = a_names[h_name]
+            else:
+                for suffix in ["股份", "集团", "控股", "有限", "公司", "企业"]:
+                    clean = h_name.rstrip(suffix)
+                    if clean and clean in a_names:
+                        matched = a_names[clean]
+                        break
+                if not matched:
+                    # 尝试 A 股名称包含 H 股简称（去掉股份）
+                    clean = h_name.replace("股份", "").replace("集团", "").replace("控股", "").strip()
+                    for a_name, (code, price) in a_names.items():
+                        if clean and (clean in a_name or a_name in clean):
+                            matched = (code, price)
+                            break
+
+            if matched:
+                a_code, a_price = matched
+                premium = (a_price / h_price - 1) * 100
+                results.append({
+                    "代码": a_code,
+                    "名称": h_name,
+                    "A股价格": round(a_price, 2),
+                    "H股价格": round(h_price, 2),
+                    "AH溢价率": round(premium, 2)
+                })
+
+        if not results:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(results)
+        self._ah_premium_cache = df
+        return df
+
+    def _get_mock_ah_premium_data(self) -> pd.DataFrame:
+        """模拟 A/H 溢价数据"""
+        mock_path = os.path.join(self.cache_dir, "mock_ah_premium.csv")
+        if os.path.exists(mock_path):
+            return pd.read_csv(mock_path, encoding="utf-8-sig")
+        from utils.mock_data import generate_mock_ah_premium
+        df = generate_mock_ah_premium()
+        os.makedirs(self.cache_dir, exist_ok=True)
+        df.to_csv(mock_path, index=False, encoding="utf-8-sig")
+        return df
+
+    # ==================== 可转债数据 ====================
+
+    def get_cb_data(self, use_mock: bool = False) -> pd.DataFrame:
+        """
+        获取可转债数据（akshare 主，mock 兜底）
+        返回: DataFrame[正股代码, 转债代码, 转债名称, 转股溢价率, 转股价值, 转债价格, 转债成交额]
+        """
+        if self._cb_data_cache is not None:
+            return self._cb_data_cache
+
+        if use_mock or self.data_source == "mock":
+            return self._get_mock_cb_data()
+
+        try:
+            # 优先使用 bond_zh_cov，包含正股代码、转股价值、转股溢价率等完整字段
+            df = ak.bond_zh_cov()
+            if df is not None and not df.empty:
+                rename_map = {
+                    "债券代码": "转债代码",
+                    "债券简称": "转债名称",
+                    "正股代码": "正股代码",
+                    "正股价": "正股价格",
+                    "转股价": "转股价",
+                    "转股价值": "转股价值",
+                    "债现价": "转债价格",
+                    "转股溢价率": "转股溢价率",
+                }
+                actual_rename = {k: v for k, v in rename_map.items() if k in df.columns}
+                df = df.rename(columns=actual_rename)
+                keep = [c for c in ["正股代码", "转债代码", "转债名称", "转股溢价率", "转股价值", "转债价格", "转股价"] if c in df.columns]
+                if "正股代码" in keep and "转股溢价率" in keep:
+                    df = df[keep].copy()
+                    df["正股代码"] = df["正股代码"].astype(str).str.strip()
+                    for col in ["转股溢价率", "转股价值", "转债价格", "转股价"]:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                    self._cb_data_cache = df
+                    return df
+
+            # 兜底：bond_zh_hs_cov_spot 仅含基本行情
+            df = ak.bond_zh_hs_cov_spot()
+            if df is not None and not df.empty:
+                rename_map = {}
+                stock_code_candidates = ["正股代码", "股票代码", "正股代码", "underlying_code"]
+                bond_code_candidates = ["代码", "债券代码", "bond_code", "code"]
+                bond_name_candidates = ["名称", "债券简称", "bond_name", "name"]
+                premium_candidates = ["转股溢价率", "溢价率", "conversion_premium"]
+                value_candidates = ["转股价值", "conversion_value"]
+                price_candidates = ["最新价", "收盘价", "转债价格", "price"]
+                amount_candidates = ["成交额", "转债成交额", "amount"]
+
+                for c in stock_code_candidates:
+                    if c in df.columns and "正股代码" not in df.columns and "正股代码" not in rename_map.values():
+                        rename_map[c] = "正股代码"
+                        break
+                for c in bond_code_candidates:
+                    if c in df.columns and "转债代码" not in df.columns and "转债代码" not in rename_map.values():
+                        rename_map[c] = "转债代码"
+                        break
+                for c in bond_name_candidates:
+                    if c in df.columns and "转债名称" not in df.columns and "转债名称" not in rename_map.values():
+                        rename_map[c] = "转债名称"
+                        break
+                for c in premium_candidates:
+                    if c in df.columns and "转股溢价率" not in df.columns and "转股溢价率" not in rename_map.values():
+                        rename_map[c] = "转股溢价率"
+                        break
+                for c in value_candidates:
+                    if c in df.columns and "转股价值" not in df.columns and "转股价值" not in rename_map.values():
+                        rename_map[c] = "转股价值"
+                        break
+                for c in price_candidates:
+                    if c in df.columns and "转债价格" not in df.columns and "转债价格" not in rename_map.values():
+                        rename_map[c] = "转债价格"
+                        break
+                for c in amount_candidates:
+                    if c in df.columns and "转债成交额" not in df.columns and "转债成交额" not in rename_map.values():
+                        rename_map[c] = "转债成交额"
+                        break
+
+                df = df.rename(columns=rename_map)
+                keep = [c for c in ["正股代码", "转债代码", "转债名称", "转股溢价率", "转股价值", "转债价格", "转债成交额"]
+                        if c in df.columns]
+                if not keep or "正股代码" not in keep or "转股溢价率" not in keep:
+                    print("     [WARN] 可转债数据字段缺失，跳过")
+                    self._cb_data_cache = pd.DataFrame()
+                    return self._cb_data_cache
+
+                df = df[keep].copy()
+                df["正股代码"] = df["正股代码"].astype(str).str.strip()
+                for col in ["转股溢价率", "转股价值", "转债价格", "转债成交额"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                self._cb_data_cache = df
+                return df
+        except Exception as e:
+            print(f"     [WARN] 可转债数据获取失败: {e}")
+
+        self._cb_data_cache = pd.DataFrame()
+        return self._cb_data_cache
+
+    def _get_mock_cb_data(self) -> pd.DataFrame:
+        """模拟可转债数据"""
+        mock_path = os.path.join(self.cache_dir, "mock_cb_data.csv")
+        if os.path.exists(mock_path):
+            return pd.read_csv(mock_path, encoding="utf-8-sig")
+        from utils.mock_data import generate_mock_cb_data
+        df = generate_mock_cb_data()
+        os.makedirs(self.cache_dir, exist_ok=True)
+        df.to_csv(mock_path, index=False, encoding="utf-8-sig")
+        return df
 
     # ==================== 新闻/情绪数据 ====================
 

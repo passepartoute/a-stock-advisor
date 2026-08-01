@@ -101,7 +101,8 @@ def analyze_stock(code: str, name: str, sector: str, fetcher: DataFetcher,
                   f_score: dict, engine: SignalEngineV2, risk_mgr: RiskManager,
                   config: dict, use_mock: bool = False,
                   moneyflow_df=None, top_list_df=None, top_inst_df=None,
-                  spot_row=None, ai_signals: dict = None):
+                  spot_row=None, ai_signals: dict = None,
+                  ah_premium_map: dict = None, cb_map: dict = None):
     """分析单只股票，返回完整结果（含一票否决信息）"""
     # AI 基本面行业得分调整
     if ai_signals:
@@ -141,7 +142,15 @@ def analyze_stock(code: str, name: str, sector: str, fetcher: DataFetcher,
     )
 
     # 综合评分（含一票否决、信号冲突处理）
-    result = engine.combine(f_score, tech, momentum, capital)
+    cb_info = cb_map.get(code, {}) if cb_map else {}
+    aux_signal = None
+    if cb_info:
+        aux_signal = {
+            "cb_premium": cb_info.get("转股溢价率"),
+            "cb_value": cb_info.get("转股价值"),
+            "cb_price": cb_info.get("转债价格")
+        }
+    result = engine.combine(f_score, tech, momentum, capital, aux_signal=aux_signal)
     result["code"] = code
     result["name"] = name
     result["sector"] = sector
@@ -471,6 +480,49 @@ def main(use_mock: bool = False):
     else:
         print(f"     {'[演示模式] 跳过' if use_mock else '未启用，跳过'}")
 
+    # 3.7 获取 A/H 溢价与可转债数据（可选增强因子）
+    print("\n[3.7/5] 获取 A/H 溢价与可转债数据...")
+    ah_premium_map = {}
+    cb_map = {}
+    ah_cfg = config.get("ah_premium", {})
+    cb_cfg = config.get("convertible_bond", {})
+
+    if ah_cfg.get("enabled", False) or cb_cfg.get("enabled", False):
+        if ah_cfg.get("enabled", False):
+            try:
+                ah_df = fetcher.get_ah_premium_data(use_mock=use_mock)
+                if not ah_df.empty:
+                    ah_premium_map = {
+                        str(row.get("代码", "")).strip(): float(row.get("AH溢价率", 0))
+                        for _, row in ah_df.iterrows()
+                    }
+                    print(f"     A/H 溢价: {len(ah_premium_map)} 只")
+                else:
+                    print("     [WARN] A/H 溢价数据不可用，跳过")
+            except Exception as e:
+                print(f"     [WARN] A/H 溢价获取异常: {e}，跳过")
+
+        if cb_cfg.get("enabled", False):
+            try:
+                cb_df = fetcher.get_cb_data(use_mock=use_mock)
+                if not cb_df.empty:
+                    cb_map = {
+                        str(row.get("正股代码", "")).strip(): {
+                            "转债代码": str(row.get("转债代码", "")).strip(),
+                            "转股溢价率": float(row.get("转股溢价率", 0)),
+                            "转股价值": float(row.get("转股价值", 0)),
+                            "转债价格": float(row.get("转债价格", 0)),
+                        }
+                        for _, row in cb_df.iterrows()
+                    }
+                    print(f"     可转债: {len(cb_map)} 只")
+                else:
+                    print("     [WARN] 可转债数据不可用，跳过")
+            except Exception as e:
+                print(f"     [WARN] 可转债获取异常: {e}，跳过")
+    else:
+        print(f"     {'[演示模式] 跳过' if use_mock else '未启用，跳过'}")
+
     # 4. 技术面 + 动量 + 风控分析（多线程）
     print("\n[4/5] 技术面与动量分析...")
     results = []
@@ -484,14 +536,15 @@ def main(use_mock: bool = False):
             name = str(row.get("名称", ""))
             sector = str(row.get("所属行业", ""))
             f_score = screener.score(row, financial_data=financial_data_map.get(code),
-                                      ai_signals=ai_signals)
+                                      ai_signals=ai_signals, ah_premium_map=ah_premium_map)
             future = executor.submit(
                 analyze_stock, code, name, sector, fetcher,
                 f_score, engine, risk_mgr, config,
                 use_mock,
                 moneyflow_df, top_list_df, top_inst_df,
                 row,  # 传入 spot row 以启用换手率评分
-                ai_signals
+                ai_signals,
+                ah_premium_map, cb_map
             )
             futures[future] = code
 
