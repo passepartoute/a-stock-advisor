@@ -42,6 +42,8 @@ class DataFetcher:
         # A/H 溢价与可转债数据缓存
         self._ah_premium_cache = None
         self._cb_data_cache = None
+        # 筹码分布数据缓存
+        self._chip_cache = None
 
     def _load_tushare_token(self):
         """从本地文件加载 tushare token"""
@@ -846,6 +848,69 @@ class DataFetcher:
             return pd.read_csv(mock_path, encoding="utf-8-sig")
         from utils.mock_data import generate_mock_cb_data
         df = generate_mock_cb_data()
+        os.makedirs(self.cache_dir, exist_ok=True)
+        df.to_csv(mock_path, index=False, encoding="utf-8-sig")
+        return df
+
+    # ==================== 筹码分布数据 ====================
+
+    def get_chip_distribution_data(self, codes: list = None, use_mock: bool = False) -> pd.DataFrame:
+        """
+        获取个股筹码分布数据（akshare stock_cyq_em）
+        返回: DataFrame[代码, 名称, 90%集中度, 70%集中度, 平均成本, 获利比例]
+        """
+        if self._chip_cache is not None:
+            return self._chip_cache
+
+        if use_mock or self.data_source == "mock":
+            return self._get_mock_chip_data()
+
+        if self.data_source in ("auto", "akshare"):
+            try:
+                results = []
+                target_codes = codes or []
+
+                def _fetch_one(symbol: str):
+                    try:
+                        df = ak.stock_cyq_em(symbol=symbol, adjust="")
+                        if df is not None and not df.empty:
+                            latest = df.iloc[-1]
+                            return {
+                                "代码": str(symbol).strip(),
+                                "名称": "",
+                                "90%集中度": float(latest.get("90集中度", 0) or 0) * 100,
+                                "70%集中度": float(latest.get("70集中度", 0) or 0) * 100,
+                                "平均成本": float(latest.get("平均成本", 0) or 0),
+                                "获利比例": float(latest.get("获利比例", 0) or 0) * 100,
+                            }
+                    except Exception:
+                        pass
+                    return None
+
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=6) as executor:
+                    futures = {executor.submit(_fetch_one, c): c for c in target_codes}
+                    for future in futures:
+                        r = future.result()
+                        if r:
+                            results.append(r)
+
+                if results:
+                    df = pd.DataFrame(results)
+                    self._chip_cache = df
+                    return df
+            except Exception as e:
+                print(f"     [WARN] 筹码分布数据获取失败: {e}")
+
+        return pd.DataFrame()
+
+    def _get_mock_chip_data(self) -> pd.DataFrame:
+        """模拟筹码分布数据"""
+        mock_path = os.path.join(self.cache_dir, "mock_chip_data.csv")
+        if os.path.exists(mock_path):
+            return pd.read_csv(mock_path, encoding="utf-8-sig")
+        from utils.mock_data import generate_mock_chip_data
+        df = generate_mock_chip_data()
         os.makedirs(self.cache_dir, exist_ok=True)
         df.to_csv(mock_path, index=False, encoding="utf-8-sig")
         return df

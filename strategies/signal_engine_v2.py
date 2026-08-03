@@ -17,10 +17,11 @@ class SignalEngineV2:
     def __init__(self, config: dict = None):
         self.config = config or {}
         self.weights = self.config.get("signal_weights", {}).get("base", {
-            "fundamental": 0.25,
-            "technical": 0.40,
+            "fundamental": 0.20,
+            "technical": 0.20,
             "momentum": 0.10,
-            "capital_flow": 0.25
+            "capital_flow": 0.35,
+            "chip_concentration": 0.15,
         })
         self.veto_cfg = self.config.get("veto_rules", {})
         self.conflict_cfg = self.config.get("signal_conflict", {})
@@ -381,12 +382,15 @@ class SignalEngineV2:
         }
 
     def combine(self, fundamental: Dict, technical: Dict, momentum: Dict,
-                capital_flow: Dict = None, aux_signal: Dict = None) -> Dict:
+                capital_flow: Dict = None, chip: Dict = None,
+                aux_signal: Dict = None) -> Dict:
         """
         加权综合评分、一票否决、信号冲突处理、建议等级
         aux_signal: 可选辅助信号，目前用于可转债确认信号
+        chip: 筹码因子评分结果
         """
         cf = capital_flow or {"score": 0, "signals": [], "details": {}}
+        chip_result = chip or {"score": 0, "signals": [], "details": {}}
 
         # 1. 一票否决
         veto_reason = self.apply_veto_rules(fundamental, technical, momentum, cf)
@@ -400,7 +404,8 @@ class SignalEngineV2:
                     "fundamental": fundamental,
                     "technical": technical,
                     "momentum": momentum,
-                    "capital_flow": cf
+                    "capital_flow": cf,
+                    "chip_concentration": chip_result,
                 }
             }
 
@@ -410,10 +415,11 @@ class SignalEngineV2:
 
         # 3. 加权综合
         total = (
-            fundamental["score"] * self.weights.get("fundamental", 0.25) +
-            technical_adjusted["score"] * self.weights.get("technical", 0.30) +
-            momentum["score"] * self.weights.get("momentum", 0.30) +
-            cf["score"] * self.weights.get("capital_flow", 0.15)
+            fundamental["score"] * self.weights.get("fundamental", 0.20) +
+            technical_adjusted["score"] * self.weights.get("technical", 0.20) +
+            momentum["score"] * self.weights.get("momentum", 0.10) +
+            cf["score"] * self.weights.get("capital_flow", 0.35) +
+            chip_result["score"] * self.weights.get("chip_concentration", 0.15)
         )
 
         # 资金面如果严重流出，额外惩罚综合分（避免15%权重不够）
@@ -504,7 +510,8 @@ class SignalEngineV2:
                 "fundamental": fundamental,
                 "technical": technical_adjusted,
                 "momentum": momentum,
-                "capital_flow": cf
+                "capital_flow": cf,
+                "chip_concentration": chip_result,
             }
         }
 

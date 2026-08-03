@@ -102,7 +102,8 @@ def analyze_stock(code: str, name: str, sector: str, fetcher: DataFetcher,
                   config: dict, use_mock: bool = False,
                   moneyflow_df=None, top_list_df=None, top_inst_df=None,
                   spot_row=None, ai_signals: dict = None,
-                  ah_premium_map: dict = None, cb_map: dict = None):
+                  ah_premium_map: dict = None, cb_map: dict = None,
+                  chip_df: pd.DataFrame = None):
     """分析单只股票，返回完整结果（含一票否决信息）"""
     # AI 基本面行业得分调整
     if ai_signals:
@@ -131,6 +132,11 @@ def analyze_stock(code: str, name: str, sector: str, fetcher: DataFetcher,
     # 技术面分析
     tech = TechnicalAnalyzer(hist, config.get("technical")).score()
 
+    # 筹码分布分析
+    from strategies.chip_analyzer import ChipAnalyzer
+    chip_analyzer = ChipAnalyzer(config)
+    chip_result = chip_analyzer.score(code, spot_row, chip_df)
+
     # 动量分析
     momentum = engine.calculate_momentum(hist)
 
@@ -150,7 +156,8 @@ def analyze_stock(code: str, name: str, sector: str, fetcher: DataFetcher,
             "cb_value": cb_info.get("转股价值"),
             "cb_price": cb_info.get("转债价格")
         }
-    result = engine.combine(f_score, tech, momentum, capital, aux_signal=aux_signal)
+    result = engine.combine(f_score, tech, momentum, capital,
+                            chip=chip_result, aux_signal=aux_signal)
     result["code"] = code
     result["name"] = name
     result["sector"] = sector
@@ -434,6 +441,19 @@ def main(use_mock: bool = False):
     if not top_inst_df.empty:
         print(f"     机构席位: {len(top_inst_df)} 只")
 
+    # 3.4 获取筹码分布数据
+    print("\n[3.4/5] 获取筹码分布数据...")
+    chip_df = pd.DataFrame()
+    chip_cfg = config.get("chip_concentration", {})
+    if chip_cfg.get("enabled", False):
+        chip_df = fetcher.get_chip_distribution_data(candidate_codes, use_mock=use_mock)
+        if not chip_df.empty:
+            print(f"     筹码分布: {len(chip_df)} 只")
+        else:
+            print("     [WARN] 筹码分布数据不可用，跳过")
+    else:
+        print(f"     {'[演示模式] 跳过' if use_mock else '未启用，跳过'}")
+
     # 3.5 预获取财务数据（用于基本面深度评分：PEG/ROE/毛利率等）
     print("\n[3.5/5] 预获取财务数据...")
     financial_data_map = {}
@@ -544,7 +564,8 @@ def main(use_mock: bool = False):
                 moneyflow_df, top_list_df, top_inst_df,
                 row,  # 传入 spot row 以启用换手率评分
                 ai_signals,
-                ah_premium_map, cb_map
+                ah_premium_map, cb_map,
+                chip_df
             )
             futures[future] = code
 

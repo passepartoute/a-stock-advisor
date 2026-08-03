@@ -89,16 +89,18 @@ class DailyReport:
         lines.extend([
             "## 今日精选",
             "",
-            "| 排名 | 代码 | 名称 | 行业 | 综合评分 | 建议 | 最新价 | 技术面 | 基本面 | 动量 | 资金面 | AI信号 | 关键信号 |",
-            "|------|------|------|------|----------|------|--------|--------|--------|------|--------|--------|----------|"
+            "| 排名 | 代码 | 名称 | 行业 | 综合评分 | 建议 | 最新价 | 技术面 | 基本面 | 动量 | 资金面 | 筹码 | AI信号 | 关键信号 |",
+            "|------|------|------|------|----------|------|--------|--------|--------|------|--------|------|--------|----------|"
         ])
 
         for i, r in enumerate(results[:20], 1):
             d = r["details"]
+            chip_signals = d.get("chip_concentration", {}).get("signals", [])
             signals = " / ".join(
                 d["technical"]["signals"][:2] +
                 d["fundamental"]["signals"][:1] +
-                d["momentum"]["signals"][:1]
+                d["momentum"]["signals"][:1] +
+                chip_signals[:1]
             )
             if r.get("conflict_triggered"):
                 signals += " / [看跌信号冲突]"
@@ -109,11 +111,12 @@ class DailyReport:
             ]))
             price = r.get("latest_price", 0)
             cf_score = d.get("capital_flow", {}).get("score", 0)
+            chip_score = d.get("chip_concentration", {}).get("score", 0)
             lines.append(
                 f"| {i} | {r['code']} | {r['name']} | {r.get('sector','')} | "
                 f"{r['total_score']} | {r['advice']} | {price} | "
                 f"{d['technical']['score']} | {d['fundamental']['score']} | "
-                f"{d['momentum']['score']} | {cf_score} | {ai_sig or '-'} | {signals} |"
+                f"{d['momentum']['score']} | {cf_score} | {chip_score} | {ai_sig or '-'} | {signals} |"
             )
 
         # 行业分散说明
@@ -138,6 +141,7 @@ class DailyReport:
                 f"- **基本面评分**: {d['fundamental']['score']} — {', '.join(d['fundamental']['signals'])}",
                 f"- **动量评分**: {d['momentum']['score']} — {', '.join(d['momentum']['signals'])}",
                 f"- **资金面评分**: {d.get('capital_flow', {}).get('score', 0)} — {', '.join(d.get('capital_flow', {}).get('signals', []))}",
+                f"- **筹码评分**: {d.get('chip_concentration', {}).get('score', 0)} — {', '.join(d.get('chip_concentration', {}).get('signals', []))}",
                 f"- **均线**: MA20={r.get('ma20','N/A')} MA60={r.get('ma60','N/A')} 年线={r.get('ma250','N/A')}",
                 ""
             ])
@@ -423,6 +427,7 @@ class DailyReport:
         table.add_column("建议", justify="center")
         table.add_column("最新价", justify="right")
         table.add_column("资金面")
+        table.add_column("筹码")
         table.add_column("AI信号")
         table.add_column("关键信号")
 
@@ -437,13 +442,16 @@ class DailyReport:
 
         for i, r in enumerate(results[:20], 1):
             d = r["details"]
+            chip_signals = d.get("chip_concentration", {}).get("signals", [])
             signals = " / ".join(
                 d["technical"]["signals"][:2] +
-                d["fundamental"]["signals"][:1]
+                d["fundamental"]["signals"][:1] +
+                chip_signals[:1]
             )
             if r.get("conflict_triggered"):
                 signals += " / [冲突]"
             cf_signals = " / ".join(d.get("capital_flow", {}).get("signals", [])[:2])
+            chip_signal_str = " / ".join(chip_signals[:2])
             ai_sig = " / ".join(filter(None, [
                 "AI提及" if r.get("ai_sentiment_reason") else "",
                 "AI行业利好" if any("AI行业利好" in s for s in d.get("fundamental", {}).get("signals", [])) else "",
@@ -457,6 +465,7 @@ class DailyReport:
                 f"[{color}]{r['advice']}[/{color}]",
                 f"{price:.2f}",
                 cf_signals,
+                chip_signal_str or "-",
                 ai_sig or "-",
                 signals
             )

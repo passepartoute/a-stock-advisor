@@ -175,6 +175,50 @@ convertible_bond:
   # 最大调整幅度
   score_cap: 0.08
 
+# ============================================================
+# 筹码分布因子配置（新增）
+# ============================================================
+chip_concentration:
+  # 是否启用筹码因子
+  enabled: true
+  # 因子权重（从技术面和资金面腾挪）
+  weight: 0.15
+
+  # 90% 成本集中度阈值（数值越低越集中）
+  concentration_90:
+    very_low: 10.0    # <=10% 视为高度集中
+    low: 20.0         # <=20% 视为较集中
+    high: 40.0        # >=40% 视为分散
+
+  # 70% 成本集中度阈值
+  concentration_70:
+    very_low: 5.0
+    low: 10.0
+    high: 25.0
+
+  # 当前价相对平均成本
+  avg_cost:
+    premium_threshold: 5.0   # 高于平均成本 5% 视为强势
+    discount_threshold: 5.0  # 低于平均成本 5% 视为弱势
+
+  # 获利比例
+  profit_ratio:
+    high: 60.0
+    low: 30.0
+
+  # 组合评分幅度
+  combination:
+    strong_concentration_bonus: 0.25
+    concentration_bonus: 0.15
+    dispersion_penalty: -0.15
+    cost_premium_bonus: 0.15
+    cost_above_bonus: 0.08
+    cost_discount_penalty: -0.15
+    low_profit_penalty: -0.10
+
+  # 单个因子得分截断
+  score_cap: 0.30
+
 # 技术指标参数
 technical:
   ma_short: 5
@@ -311,11 +355,13 @@ signal_weights:
   # 基础权重
   # v2.4: 基于2026-06月回测IC — 技术面(IC+0.71)显著正向, 基本面(IC-0.26)反向,
   #       资金面(IC+0.33)显著正向。提权技术面, 降权基本面。
+  # v2.5: 新增筹码因子 15%，从技术面(-5%)和资金面(-10%)腾挪。
   base:
     fundamental: 0.20
-    technical: 0.25
+    technical: 0.20
     momentum: 0.10
-    capital_flow: 0.45
+    capital_flow: 0.35
+    chip_concentration: 0.15
 
   # 动态权重：根据市场状态和个股趋势自动调整
   dynamic:
@@ -323,21 +369,24 @@ signal_weights:
     # 强势市场（大盘在年线之上）
     bull_trend:
       fundamental: 0.15
-      technical: 0.30
+      technical: 0.25
       momentum: 0.10
-      capital_flow: 0.45
+      capital_flow: 0.35
+      chip_concentration: 0.15
     # 弱势市场（大盘在年线之下）：资金面防御权重最高，动量几乎不参与
     bear_trend:
       fundamental: 0.25
-      technical: 0.20
+      technical: 0.15
       momentum: 0.05
-      capital_flow: 0.50
+      capital_flow: 0.40
+      chip_concentration: 0.15
     # 震荡/不明
     neutral:
       fundamental: 0.20
-      technical: 0.25
+      technical: 0.20
       momentum: 0.10
-      capital_flow: 0.45
+      capital_flow: 0.35
+      chip_concentration: 0.15
 
 # ============================================================
 # 一票否决规则（新增）

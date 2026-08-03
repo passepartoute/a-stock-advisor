@@ -61,6 +61,7 @@ class TushareBacktester:
         self._daily_basic_cache = {}       # 按日期缓存 daily_basic（P0-1 修复）
         self._ah_premium_cache = None
         self._cb_data_cache = None
+        self._chip_data_cache = None
 
         # 交易成本（P0-2 修复）
         self.commission_rate = 0.00015     # 佣金万1.5，买卖双向
@@ -105,6 +106,14 @@ class TushareBacktester:
             return self._cb_data_cache
         df = self._aux_fetcher.get_cb_data(use_mock=use_mock)
         self._cb_data_cache = df
+        return df
+
+    def get_chip_data(self, use_mock: bool = False):
+        """获取筹码分布数据（回测使用最新数据近似历史）"""
+        if self._chip_data_cache is not None:
+            return self._chip_data_cache
+        df = self._aux_fetcher.get_chip_distribution_data(use_mock=use_mock)
+        self._chip_data_cache = df
         return df
 
     def _get_recent_trade_date_before(self, target_date, days_back=10):
@@ -525,6 +534,22 @@ class TushareBacktester:
         else:
             print("  未启用可转债因子")
 
+        # 2.6 获取筹码分布数据（可选增强因子，回测使用最新数据近似历史）
+        print("\n[2.6/8] 获取筹码分布数据...")
+        chip_cfg = self.config.get("chip_concentration", {})
+        chip_df = pd.DataFrame()
+        if chip_cfg.get("enabled", False):
+            try:
+                chip_df = self.get_chip_data(use_mock=False)
+                if not chip_df.empty:
+                    print(f"  筹码分布: {len(chip_df)} 只")
+                else:
+                    print("  [WARN] 筹码分布数据不可用，跳过")
+            except Exception as e:
+                print(f"  [WARN] 筹码分布获取异常: {e}，跳过")
+        else:
+            print("  未启用筹码分布因子")
+
         # 3. 获取期初估值数据，做宽松筛选获取K线范围（P0-1：用期初数据而非期末）
         print("\n[3/8] 获取期初估值数据（宽松筛选，用于预取K线）...")
         initial_trade_date = self._get_recent_trade_date_before(backtest_dates[0])
@@ -749,12 +774,20 @@ class TushareBacktester:
                     moneyflow_df=None, top_list_df=None, top_inst_df=None
                 )
 
+                # 筹码分布分析
+                from strategies.chip_analyzer import ChipAnalyzer
+                chip_analyzer = ChipAnalyzer(self.config)
+                chip_result = chip_analyzer.score(code, spot_row_data, chip_df)
+
                 # 可转债辅助信号
                 cb_info = cb_map.get(code, {})
                 aux_signal = {"cb_premium": cb_info.get("转股溢价率")} if cb_info else None
 
                 # 综合评分（v2: 含一票否决、信号冲突处理）
-                result = self.engine.combine(f_score, tech, momentum, capital, aux_signal=aux_signal)
+                result = self.engine.combine(
+                    f_score, tech, momentum, capital,
+                    chip=chip_result, aux_signal=aux_signal
+                )
                 result["code"] = code
                 result["name"] = str(row.get("名称", ""))
                 result["sector"] = str(row.get("所属行业", ""))
@@ -871,6 +904,7 @@ class TushareBacktester:
                         "technical": details.get("technical", {}).get("score", 0),
                         "momentum": details.get("momentum", {}).get("score", 0),
                         "capital_flow": details.get("capital_flow", {}).get("score", 0),
+                        "chip_concentration": details.get("chip_concentration", {}).get("score", 0),
                         "total_score": daily[code].get("total_score", 0),
                         "return": pick["return_pct"]
                     })
@@ -895,6 +929,7 @@ class TushareBacktester:
             "technical": "技术面因子",
             "momentum": "动量因子",
             "capital_flow": "资金面因子",
+            "chip_concentration": "筹码因子",
             "total_score": "综合评分",
         }
 
@@ -931,6 +966,7 @@ class TushareBacktester:
                     "technical": "技术面因子",
                     "momentum": "动量因子",
                     "capital_flow": "资金面因子",
+                    "chip_concentration": "筹码因子",
                     "total_score": "综合评分",
                 }
                 print(f"\n  [IC 建议] 最强因子: {factor_labels_cn.get(best_factor, best_factor)} ({ic_results[best_factor]:+.3f})")
@@ -1627,9 +1663,10 @@ def run_demo_backtest():
     print(f"  通过基本面筛选: {len(candidates)} 只")
 
     # 生成模拟 A/H 溢价与可转债数据
-    from utils.mock_data import generate_mock_ah_premium, generate_mock_cb_data
+    from utils.mock_data import generate_mock_ah_premium, generate_mock_cb_data, generate_mock_chip_data
     ah_df = generate_mock_ah_premium()
     cb_df = generate_mock_cb_data()
+    chip_df = generate_mock_chip_data(n_stocks)
     ah_premium_map = {
         str(row.get("代码", "")).strip(): float(row.get("AH溢价率", 0))
         for _, row in ah_df.iterrows()
@@ -1640,7 +1677,7 @@ def run_demo_backtest():
         }
         for _, row in cb_df.iterrows()
     }
-    print(f"  模拟 A/H 溢价: {len(ah_premium_map)} 只，可转债: {len(cb_map)} 只")
+    print(f"  模拟 A/H 溢价: {len(ah_premium_map)} 只，可转债: {len(cb_map)} 只，筹码分布: {len(chip_df)} 只")
 
     backtest_dates = pd.to_datetime(["2026-05-06", "2026-05-13", "2026-05-20", "2026-05-27"])
     eval_end = datetime(2026, 6, 6)
@@ -1669,9 +1706,15 @@ def run_demo_backtest():
             momentum = engine.calculate_momentum(hist_bt)
             capital = engine.calculate_capital_flow(code, row,
                 moneyflow_df=None, top_list_df=None, top_inst_df=None)
+            from strategies.chip_analyzer import ChipAnalyzer
+            chip_analyzer = ChipAnalyzer(config)
+            chip_result = chip_analyzer.score(code, row, chip_df)
             cb_info = cb_map.get(code, {})
             aux_signal = {"cb_premium": cb_info.get("转股溢价率")} if cb_info else None
-            result = engine.combine(f_score, tech, momentum, capital, aux_signal=aux_signal)
+            result = engine.combine(
+                f_score, tech, momentum, capital,
+                chip=chip_result, aux_signal=aux_signal
+            )
             result["code"] = code
             result["name"] = str(row.get("名称", ""))
             result["sector"] = str(row.get("所属行业", ""))

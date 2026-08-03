@@ -137,6 +137,28 @@ def generate_mock_cb_data(n_bonds: int = 30) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
+def generate_mock_chip_data(n_stocks: int = 200) -> pd.DataFrame:
+    """生成模拟筹码分布数据"""
+    np.random.seed(46)
+    data = []
+    for i in range(n_stocks):
+        code = f"{600000 + i:06d}"
+        c90 = round(np.random.uniform(5, 50), 2)
+        c70 = round(c90 * np.random.uniform(0.4, 0.7), 2)
+        close = np.random.uniform(5, 100)
+        avg_cost = round(close * np.random.uniform(0.90, 1.10), 2)
+        profit = round(np.random.uniform(10, 90), 2)
+        data.append({
+            "代码": code,
+            "名称": f"模拟股票{i+1}",
+            "90%集中度": c90,
+            "70%集中度": c70,
+            "平均成本": avg_cost,
+            "获利比例": profit,
+        })
+    return pd.DataFrame(data)
+
+
 def save_mock_data(output_dir="data"):
     os.makedirs(output_dir, exist_ok=True)
     spot = generate_mock_spot(200)
