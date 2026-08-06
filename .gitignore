@@ -29,3 +29,7 @@ secrets/
 # Outputs (generated reports are deployed to gh-pages branch, not main)
 reports/output/
 output/
+
+# Local tooling artifacts
+.ua/
+docs/superpowers/
