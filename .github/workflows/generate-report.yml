@@ -25,6 +25,8 @@ on:
 # gh-pages 分支部署需要写入仓库内容权限
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: "pages"
@@ -34,6 +36,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     env:
       # CI 环境下使用 data_source: auto，自动在 akshare / tushare / mock 之间降级，提高稳定性
       DATA_SOURCE: auto
@@ -140,13 +145,22 @@ jobs:
         run: |
           echo "${{ vars.CUSTOM_DOMAIN }}" > _site/CNAME
 
-      - name: Deploy to gh-pages
+      - name: Backup site to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./_site
           publish_branch: gh-pages
           keep_files: false
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
       # 可选：邮件通知（需要配置 EMAIL_USERNAME 和 EMAIL_PASSWORD secrets）
       - name: Send email notification
