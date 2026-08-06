@@ -144,6 +144,24 @@ mypy .
 | Beta | 1.83 |
 | Info Ratio | 5.75 |
 
+## GitHub Pages Custom Domain
+
+Reports are deployed to the `gh-pages` branch and can be served via a custom domain instead of the default `https://passepartoute.github.io/a-stock-advisor/` URL.
+
+### Configuration
+
+1. Set the repository variable `CUSTOM_DOMAIN` under **Settings → Secrets and variables → Actions → Variables**.
+   - Example value: `myasibo.cc`
+2. The workflow (`generate-report.yml`) writes a `CNAME` file into `_site` automatically when `CUSTOM_DOMAIN` is set, so the custom domain persists across deployments.
+3. Configure DNS records for `myasibo.cc`. For this GitHub Pages project site, point the apex domain to the GitHub Pages IPs and use a `www` CNAME:
+   - A records for `@`: `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`
+   - AAAA records for `@`: `2606:50c0:8000::153`, `2606:50c0:8001::153`, `2606:50c0:8002::153`, `2606:50c0:8003::153`
+   - CNAME record for `www`: `passepartoute.github.io`
+4. In the repository, go to **Settings → Pages → Custom domain**, enter `myasibo.cc`, and wait for the DNS check and SSL certificate to complete.
+5. Enable **Enforce HTTPS** once the certificate is issued.
+
+If `CUSTOM_DOMAIN` is not set, the workflow falls back to the default GitHub Pages URL in the email notification.
+
 ## Confirmed Improvements (v2.4)
 
 | # | Improvement | File(s) | Effect |

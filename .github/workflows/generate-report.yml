@@ -135,6 +135,11 @@ jobs:
         run: |
           python3 .github/scripts/generate_pages_index.py _site --days 30
 
+      - name: Write CNAME for custom domain
+        if: vars.CUSTOM_DOMAIN != ''
+        run: |
+          echo "${{ vars.CUSTOM_DOMAIN }}" > _site/CNAME
+
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
@@ -160,5 +165,5 @@ jobs:
           body: |
             报告已生成完成。
 
-            在线查看：https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+            在线查看：https://${{ vars.CUSTOM_DOMAIN || format('{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}/
             运行日志：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
