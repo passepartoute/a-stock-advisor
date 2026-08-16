@@ -44,6 +44,8 @@ class DataFetcher:
         self._cb_data_cache = None
         # 筹码分布数据缓存
         self._chip_cache = None
+        # 限售解禁数据缓存
+        self._share_float_cache = None
 
     def _load_tushare_token(self):
         """从本地文件加载 tushare token"""
@@ -381,20 +383,41 @@ class DataFetcher:
     # ==================== 资金面高级数据 (tushare) ====================
 
     def get_moneyflow_data(self, codes: list, trade_date: str = None) -> pd.DataFrame:
-        """获取个股资金流向数据 (moneyflow)"""
-        if self._moneyflow_cache is not None:
-            return self._moneyflow_cache
+        """获取个股资金流向数据（tushare moneyflow_dc 主源，旧版 moneyflow 兜底）"""
+        if self._moneyflow_cache is None:
+            self._moneyflow_cache = {}
+        cache_key = trade_date or "latest"
+        if cache_key in self._moneyflow_cache:
+            return self._moneyflow_cache[cache_key]
         pro = self._get_tushare_pro()
         if not pro:
             return pd.DataFrame()
+
+        trade_date = trade_date or self._get_last_trade_date()
+
+        # 主源：moneyflow_dc（东方财富口径，各档位为净流入额，单位万元）
         try:
-            trade_date = trade_date or self._get_last_trade_date()
-            # tushare moneyflow 不支持批量代码，需逐个查询或按日期查
-            # 策略：先按日期查当日全部，再过滤
+            df = pro.moneyflow_dc(trade_date=trade_date)
+            if df is not None and not df.empty:
+                df["代码"] = df["ts_code"].str.replace(r"\.SH|\.SZ", "", regex=True)
+                # 主力净流入 = net_amount（超大单+大单净流入）
+                df["主力净流入"] = df.get("net_amount", 0)
+                # 散户净流出 = 小单净流入（正值表示散户在买）
+                df["散户净流出"] = df.get("buy_sm_amount", 0)
+                # 净流入占比：net_amount_rate 是百分比数值，转为小数保持兼容
+                df["净流入占比"] = df.get("net_amount_rate", 0) / 100.0
+                if codes:
+                    df = df[df["代码"].isin(codes)]
+                self._moneyflow_cache[cache_key] = df
+                return df
+        except Exception as e:
+            print(f"     [WARN] 东财资金流向获取失败: {e}")
+
+        # 兜底：旧版 moneyflow（买卖分列）
+        try:
             df = pro.moneyflow(trade_date=trade_date)
             if df is not None and not df.empty:
                 df["代码"] = df["ts_code"].str.replace(r"\.SH|\.SZ", "", regex=True)
-                # 计算关键指标
                 # 主力净流入 = 大单 + 特大单买入 - 卖出
                 df["主力净流入"] = (
                     df.get("buy_lg_amount", 0) + df.get("buy_elg_amount", 0)
@@ -411,7 +434,7 @@ class DataFetcher:
                 # 过滤
                 if codes:
                     df = df[df["代码"].isin(codes)]
-                self._moneyflow_cache = df
+                self._moneyflow_cache[cache_key] = df
                 return df
         except Exception as e:
             print(f"     [WARN] 资金流向获取失败: {e}")
@@ -584,6 +607,59 @@ class DataFetcher:
         if not high.empty and "代码" in high.columns:
             high = high.sort_values("质押比例", ascending=False).reset_index(drop=True)
         return high
+
+    # ==================== 限售解禁数据 ====================
+
+    def get_share_float_data(self, days_ahead: int = 30, base_date: str = None) -> pd.DataFrame:
+        """
+        获取未来 N 天内的限售股解禁数据 (tushare share_float)
+        base_date: 基准日 YYYYMMDD，默认今天；回测传入历史日期
+        返回: DataFrame[代码, 解禁占比, 最近解禁日]
+        """
+        if self._share_float_cache is None:
+            self._share_float_cache = {}
+        cache_key = f"{base_date or 'today'}_{days_ahead}"
+        if cache_key in self._share_float_cache:
+            return self._share_float_cache[cache_key]
+
+        pro = self._get_tushare_pro()
+        if not pro:
+            return pd.DataFrame()
+
+        try:
+            base = datetime.strptime(base_date, "%Y%m%d") if base_date else datetime.now()
+            records = []
+            for i in range(1, days_ahead + 1):
+                d = (base + timedelta(days=i)).strftime("%Y%m%d")
+                try:
+                    df = pro.share_float(float_date=d)
+                    if df is not None and not df.empty:
+                        records.append(df)
+                except Exception:
+                    continue
+            if not records:
+                self._share_float_cache[cache_key] = pd.DataFrame()
+                return self._share_float_cache[cache_key]
+
+            all_df = pd.concat(records, ignore_index=True)
+            all_df["代码"] = all_df["ts_code"].str.replace(r"\.SH|\.SZ|\.BJ", "", regex=True)
+            all_df["float_ratio"] = pd.to_numeric(all_df["float_ratio"], errors="coerce").fillna(0)
+            # 消除未来数据泄漏：只保留基准日之前已公告的解禁记录
+            if base_date and "ann_date" in all_df.columns:
+                all_df = all_df[all_df["ann_date"].astype(str) <= base_date]
+            if all_df.empty:
+                self._share_float_cache[cache_key] = pd.DataFrame()
+                return self._share_float_cache[cache_key]
+            # 按股票聚合：窗口内解禁占比合计 + 最近解禁日
+            agg = all_df.groupby("代码").agg(
+                解禁占比=("float_ratio", "sum"),
+                最近解禁日=("float_date", "min"),
+            ).reset_index()
+            self._share_float_cache[cache_key] = agg
+            return agg
+        except Exception as e:
+            print(f"     [WARN] 解禁数据获取失败: {e}")
+            return pd.DataFrame()
 
     # ==================== A/H 溢价数据 ====================
 

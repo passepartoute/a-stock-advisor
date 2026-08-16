@@ -734,12 +734,45 @@ class TushareBacktester:
                 except Exception as e:
                     print(f"  [WARN] 筹码数据获取异常: {e}，本期跳过")
 
+            # 获取本期资金流向数据（tushare moneyflow_dc 历史日期）
+            moneyflow_df = pd.DataFrame()
+            try:
+                moneyflow_df = self._aux_fetcher.get_moneyflow_data(
+                    codes=None, trade_date=period_trade_date
+                )
+            except Exception as e:
+                print(f"  [WARN] 资金流向数据获取异常: {e}，本期仅按换手率评分")
+
             # 本期严格筛选
             screener = FundamentalScreener(spot_period, self.config)
             screener.set_pledge_data(pledge_df)
             candidates = screener.screen()
             if candidates.empty:
                 print(f"  本期基本面筛选后无候选股票")
+                continue
+
+            # 限售解禁避雷（按本期日期向前看 N 天，仅使用当时已公告的记录）
+            sf_cfg = self.config.get("share_float_avoidance", {})
+            if sf_cfg.get("enabled", False):
+                try:
+                    float_df = self._aux_fetcher.get_share_float_data(
+                        days_ahead=sf_cfg.get("lookahead_days", 30),
+                        base_date=period_trade_date,
+                    )
+                    if not float_df.empty:
+                        threshold = sf_cfg.get("float_ratio_threshold", 5.0)
+                        risky_codes = set(
+                            float_df[float_df["解禁占比"] >= threshold]["代码"].astype(str).tolist()
+                        )
+                        n_risky = len(set(candidates["代码"].astype(str).tolist()) & risky_codes)
+                        if n_risky > 0:
+                            candidates = candidates[~candidates["代码"].astype(str).isin(risky_codes)]
+                            print(f"  解禁避雷: 排除 {n_risky} 只 -> 剩余 {len(candidates)}")
+                except Exception as e:
+                    print(f"  [WARN] 解禁数据获取异常: {e}，跳过")
+
+            if candidates.empty:
+                print(f"  解禁避雷后无候选股票")
                 continue
 
             daily_results = []
@@ -777,11 +810,11 @@ class TushareBacktester:
                 # 动量分析
                 momentum = self.engine.calculate_momentum(hist_bt)
 
-                # 资金面（历史回测无可用的 moneyflow/top_list 数据，仅换手率可用）
+                # 资金面（tushare moneyflow_dc 历史数据，无则仅按换手率评分）
                 spot_row_data = row.copy() if row is not None else pd.Series()
                 capital = self.engine.calculate_capital_flow(
                     code, spot_row_data,
-                    moneyflow_df=None, top_list_df=None, top_inst_df=None
+                    moneyflow_df=moneyflow_df, top_list_df=None, top_inst_df=None
                 )
 
                 # 筹码分布分析

@@ -421,6 +421,26 @@ def main(use_mock: bool = False):
                 print(f"     无跌停股")
         else:
             print(f"     涨跌停数据不可用，跳过")
+
+        # 限售解禁避雷
+        sf_cfg = config.get("share_float_avoidance", {})
+        if sf_cfg.get("enabled", False):
+            float_df = fetcher.get_share_float_data(
+                days_ahead=sf_cfg.get("lookahead_days", 30)
+            )
+            if not float_df.empty:
+                threshold = sf_cfg.get("float_ratio_threshold", 5.0)
+                risky = float_df[float_df["解禁占比"] >= threshold]
+                risky_codes = set(risky["代码"].astype(str).tolist())
+                n_risky = len(set(candidates["代码"].astype(str).tolist()) & risky_codes)
+                if n_risky > 0:
+                    candidates = candidates[~candidates["代码"].astype(str).isin(risky_codes)]
+                    print(f"     排除{sf_cfg.get('lookahead_days', 30)}天内大额解禁股: {n_risky} 只 -> 剩余 {len(candidates)}")
+                else:
+                    print(f"     无大额解禁股")
+            else:
+                print(f"     解禁数据不可用，跳过")
+
         if candidates.empty:
             print("停牌/跌停排除后无候选股票，退出")
             return
