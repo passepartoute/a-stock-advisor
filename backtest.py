@@ -108,12 +108,17 @@ class TushareBacktester:
         self._cb_data_cache = df
         return df
 
-    def get_chip_data(self, use_mock: bool = False):
-        """获取筹码分布数据（回测使用最新数据近似历史）"""
-        if self._chip_data_cache is not None:
-            return self._chip_data_cache
-        df = self._aux_fetcher.get_chip_distribution_data(use_mock=use_mock)
-        self._chip_data_cache = df
+    def get_chip_data(self, trade_date: str = None, use_mock: bool = False):
+        """获取筹码分布数据（tushare cyq_perf 支持历史日期，按日期缓存）"""
+        if self._chip_data_cache is None:
+            self._chip_data_cache = {}
+        cache_key = trade_date or "latest"
+        if cache_key in self._chip_data_cache:
+            return self._chip_data_cache[cache_key]
+        df = self._aux_fetcher.get_chip_distribution_data(
+            trade_date=trade_date, use_mock=use_mock
+        )
+        self._chip_data_cache[cache_key] = df
         return df
 
     def _get_recent_trade_date_before(self, target_date, days_back=10):
@@ -534,21 +539,13 @@ class TushareBacktester:
         else:
             print("  未启用可转债因子")
 
-        # 2.6 获取筹码分布数据（可选增强因子，回测使用最新数据近似历史）
-        print("\n[2.6/8] 获取筹码分布数据...")
+        # 2.6 筹码分布因子开关检查（tushare cyq_perf 支持历史日期，逐期获取）
         chip_cfg = self.config.get("chip_concentration", {})
-        chip_df = pd.DataFrame()
-        if chip_cfg.get("enabled", False):
-            try:
-                chip_df = self.get_chip_data(use_mock=False)
-                if not chip_df.empty:
-                    print(f"  筹码分布: {len(chip_df)} 只")
-                else:
-                    print("  [WARN] 筹码分布数据不可用，跳过")
-            except Exception as e:
-                print(f"  [WARN] 筹码分布获取异常: {e}，跳过")
+        chip_enabled = chip_cfg.get("enabled", False)
+        if chip_enabled:
+            print("\n[2.6/8] 筹码分布因子已启用（逐期获取历史数据）")
         else:
-            print("  未启用筹码分布因子")
+            print("\n[2.6/8] 未启用筹码分布因子")
 
         # 3. 获取期初估值数据，做宽松筛选获取K线范围（P0-1：用期初数据而非期末）
         print("\n[3/8] 获取期初估值数据（宽松筛选，用于预取K线）...")
@@ -726,6 +723,16 @@ class TushareBacktester:
                 print(f"  [WARN] {period_trade_date} 估值数据为空，跳过本期")
                 continue
 
+            # 获取本期筹码分布数据（tushare cyq_perf 历史日期，消除未来数据泄漏）
+            chip_df = pd.DataFrame()
+            if chip_enabled:
+                try:
+                    chip_df = self.get_chip_data(trade_date=period_trade_date)
+                    if chip_df.empty:
+                        print(f"  [WARN] {period_trade_date} 筹码数据为空，本期筹码因子按0分处理")
+                except Exception as e:
+                    print(f"  [WARN] 筹码数据获取异常: {e}，本期跳过")
+
             # 本期严格筛选
             screener = FundamentalScreener(spot_period, self.config)
             screener.set_pledge_data(pledge_df)
@@ -736,6 +743,8 @@ class TushareBacktester:
 
             daily_results = []
             skipped = 0
+            from strategies.chip_analyzer import ChipAnalyzer
+            chip_analyzer = ChipAnalyzer(self.config)
 
             for _, row in candidates.iterrows():
                 code = str(row["代码"])
@@ -775,8 +784,6 @@ class TushareBacktester:
                 )
 
                 # 筹码分布分析
-                from strategies.chip_analyzer import ChipAnalyzer
-                chip_analyzer = ChipAnalyzer(self.config)
                 chip_result = chip_analyzer.score(code, spot_row_data, chip_df)
 
                 # 可转债辅助信号

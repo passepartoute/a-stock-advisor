@@ -854,54 +854,110 @@ class DataFetcher:
 
     # ==================== 筹码分布数据 ====================
 
-    def get_chip_distribution_data(self, codes: list = None, use_mock: bool = False) -> pd.DataFrame:
+    def get_chip_distribution_data(self, codes: list = None, trade_date: str = None,
+                                   use_mock: bool = False) -> pd.DataFrame:
         """
-        获取个股筹码分布数据（akshare stock_cyq_em）
+        获取个股筹码分布数据（tushare cyq_perf 主源，akshare stock_cyq_em 兜底）
+        trade_date: 交易日期 YYYYMMDD，默认最近交易日（实盘）；回测传入历史日期
         返回: DataFrame[代码, 名称, 90%集中度, 70%集中度, 平均成本, 获利比例]
         """
-        if self._chip_cache is not None:
-            return self._chip_cache
+        cache_key = trade_date or "latest"
+        if self._chip_cache is None:
+            self._chip_cache = {}
+        if cache_key in self._chip_cache:
+            return self._chip_cache[cache_key]
 
         if use_mock or self.data_source == "mock":
             return self._get_mock_chip_data()
 
+        # 主源：tushare cyq_perf 批量接口（一次调用返回全市场）
+        if self.data_source in ("auto", "tushare"):
+            df = self._get_chip_data_tushare(codes, trade_date)
+            if not df.empty:
+                self._chip_cache[cache_key] = df
+                return df
+            print("     [WARN] tushare 筹码数据获取失败，尝试 akshare...")
+
+        # 兜底：akshare 逐股获取
         if self.data_source in ("auto", "akshare"):
-            try:
-                results = []
-                target_codes = codes or []
+            df = self._get_chip_data_akshare(codes)
+            if not df.empty:
+                self._chip_cache[cache_key] = df
+                return df
 
-                def _fetch_one(symbol: str):
-                    try:
-                        df = ak.stock_cyq_em(symbol=symbol, adjust="")
-                        if df is not None and not df.empty:
-                            latest = df.iloc[-1]
-                            return {
-                                "代码": str(symbol).strip(),
-                                "名称": "",
-                                "90%集中度": float(latest.get("90集中度", 0) or 0) * 100,
-                                "70%集中度": float(latest.get("70集中度", 0) or 0) * 100,
-                                "平均成本": float(latest.get("平均成本", 0) or 0),
-                                "获利比例": float(latest.get("获利比例", 0) or 0) * 100,
-                            }
-                    except Exception:
-                        pass
-                    return None
+        return pd.DataFrame()
 
-                from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=6) as executor:
-                    futures = {executor.submit(_fetch_one, c): c for c in target_codes}
-                    for future in futures:
-                        r = future.result()
-                        if r:
-                            results.append(r)
+    def _get_chip_data_tushare(self, codes: list = None, trade_date: str = None) -> pd.DataFrame:
+        """通过 tushare cyq_perf 获取全市场筹码数据（单次批量调用）"""
+        pro = self._get_tushare_pro()
+        if not pro:
+            return pd.DataFrame()
+        try:
+            trade_date = trade_date or self._get_last_trade_date()
+            df = pro.cyq_perf(trade_date=trade_date)
+            if df is None or df.empty:
+                return pd.DataFrame()
 
-                if results:
-                    df = pd.DataFrame(results)
-                    self._chip_cache = df
-                    return df
-            except Exception as e:
-                print(f"     [WARN] 筹码分布数据获取失败: {e}")
+            df["代码"] = df["ts_code"].str.replace(r"\.SH|\.SZ", "", regex=True)
+            # 90% 集中度 = (cost_95pct - cost_5pct) / (cost_95pct + cost_5pct) * 100
+            # 70% 集中度 = (cost_85pct - cost_15pct) / (cost_85pct + cost_15pct) * 100
+            denom_90 = df["cost_95pct"] + df["cost_5pct"]
+            denom_70 = df["cost_85pct"] + df["cost_15pct"]
+            df["90%集中度"] = np.where(
+                denom_90 > 0, (df["cost_95pct"] - df["cost_5pct"]) / denom_90 * 100, np.nan
+            )
+            df["70%集中度"] = np.where(
+                denom_70 > 0, (df["cost_85pct"] - df["cost_15pct"]) / denom_70 * 100, np.nan
+            )
+            df["平均成本"] = df["weight_avg"]
+            df["获利比例"] = df["winner_rate"]
 
+            keep = ["代码", "90%集中度", "70%集中度", "平均成本", "获利比例"]
+            df = df[keep].copy()
+            df["名称"] = ""
+
+            if codes:
+                df = df[df["代码"].isin([str(c).strip() for c in codes])]
+            return df.reset_index(drop=True)
+        except Exception as e:
+            print(f"     [WARN] tushare 筹码数据获取失败: {e}")
+            return pd.DataFrame()
+
+    def _get_chip_data_akshare(self, codes: list = None) -> pd.DataFrame:
+        """akshare stock_cyq_em 逐股获取（兜底，速度慢）"""
+        try:
+            results = []
+            target_codes = codes or []
+
+            def _fetch_one(symbol: str):
+                try:
+                    df = ak.stock_cyq_em(symbol=symbol, adjust="")
+                    if df is not None and not df.empty:
+                        latest = df.iloc[-1]
+                        return {
+                            "代码": str(symbol).strip(),
+                            "名称": "",
+                            "90%集中度": float(latest.get("90集中度", 0) or 0) * 100,
+                            "70%集中度": float(latest.get("70集中度", 0) or 0) * 100,
+                            "平均成本": float(latest.get("平均成本", 0) or 0),
+                            "获利比例": float(latest.get("获利比例", 0) or 0) * 100,
+                        }
+                except Exception:
+                    pass
+                return None
+
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                futures = {executor.submit(_fetch_one, c): c for c in target_codes}
+                for future in futures:
+                    r = future.result()
+                    if r:
+                        results.append(r)
+
+            if results:
+                return pd.DataFrame(results)
+        except Exception as e:
+            print(f"     [WARN] 筹码分布数据获取失败: {e}")
         return pd.DataFrame()
 
     def _get_mock_chip_data(self) -> pd.DataFrame:
