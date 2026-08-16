@@ -1,0 +1,684 @@
+# ============================================================
+# A股多因子投资策略配置 v2.1
+# 价值投资 + 技术面择时 + 动态权重 + 一票否决 + 风控体系
+# ============================================================
+
+# 投资风格：conservative(保守) / balanced(稳健) / aggressive(进取)
+investment_style: balanced
+
+# 数据源配置
+# data_source: auto(自动选择) / akshare / tushare / mock(模拟数据)
+# 如需使用 tushare，请将 config/.tushare_token.example 复制为 .tushare_token 并填入你的 token
+data_source: tushare
+
+# ============================================================
+# 数据质量校验（新增）
+# ============================================================
+data_quality:
+  # 分析个股所需最小历史交易日
+  min_history_days: 250
+  # 关键字段缺失时的处理：abort(中止运行) / warn(警告但继续) / skip(跳过该股票)
+  missing_index_ma250_action: abort
+  missing_stock_ma250_action: skip
+  # 年线数据质量阈值：MA250 为 0 或 NaN 视为缺失
+  invalid_ma250_values: [0, null, NaN]
+
+# ============================================================
+# 股票池设置
+# ============================================================
+stock_pool:
+  # 优先配置的行业（白名单）
+  preferred_sectors:
+    - "银行"
+    - "证券"
+    - "保险"
+    - "白酒"
+    - "食品饮料"
+    - "家电行业"
+    - "医疗器械"
+    - "生物制品"
+    - "中药"
+    - "化学制药"
+    - "电力行业"
+    - "电力"
+    - "公路铁路"
+    - "电网设备"
+    - "工程机械"
+    - "半导体"
+    - "石油行业"
+    - "有色金属"
+    - "化学制品"
+    - "汽车零部件"
+    - "专用设备"
+    - "通用设备"
+    - "通信设备"
+    - "计算机设备"
+    - "电子元件"
+    - "光学光电子"
+    - "消费电子"
+    - "互联网服务"
+    - "软件开发"
+    - "IT服务"
+    - "农牧饲渔"
+    - "养殖业"
+    - "农产品加工"
+    - "饲料"
+
+  # 回避的行业（黑名单）
+  excluded_sectors:
+    - "教育"
+    - "培训"
+    - "互联网"
+    - "游戏"
+    - "影视"
+
+  # 自定义股票列表（强制纳入，跳过市值/PE/PB/股息率/行业白名单等硬条件）
+  # 但仍会检查：ST排除、黑名单行业、股权质押避雷、一票否决
+  custom_stocks:
+    # === 原有持仓 ===
+    - "600900"   # 长江电力
+    - "601006"   # 大秦铁路
+    - "002179"   # 中航光电
+    - "600941"   # 中国移动
+    # === 液冷概念股 ===
+    - "002837"   # 英维克（精密温控/液冷龙头）
+    - "300499"   # 高澜股份（液冷技术）
+    - "300990"   # 同飞股份（工业温控/液冷）
+    - "301018"   # 申菱环境（专用空调/液冷）
+    - "603912"   # 佳力图（机房温控）
+    - "000977"   # 浪潮信息（服务器/液冷）
+    - "603019"   # 中科曙光（服务器/液冷）
+    - "300442"   # 润泽科技（数据中心）
+    - "300017"   # 网宿科技（CDN/液冷）
+    # === 化工龙头 ===
+    - "600309"   # 万华化学（化工龙头）
+    # === 猪肉概念股 ===
+    - "002714"   # 牧原股份（养殖龙头）
+    - "300498"   # 温氏股份（养殖）
+    - "000876"   # 新希望（养殖/饲料）
+    - "605296"   # 神农集团（养殖）
+    - "603477"   # 巨星农牧（养殖）
+
+# 市值范围（亿）—— 按投资风格自动选择
+market_cap:
+  conservative:
+    min: 500
+    max: 100000
+  balanced:
+    min: 100
+    max: 2000
+  aggressive:
+    min: 50
+    max: 1000
+  # 绝对下限（所有风格通用）
+  absolute_min: 30
+
+# 估值阈值
+valuation:
+  # PE TTM 上限（0表示不限制）
+  max_pe: 50
+  # PE 为负/亏损时是否排除
+  exclude_negative_pe: true
+  # PB 上限
+  max_pb: 5
+  # 股息率下限（%）
+  min_dividend_yield: 0.5
+  # 高股息加分阈值（%）
+  high_dividend_yield: 3.0
+  # PEG 上限（预留，需财务数据）
+  max_peg: 1.0
+
+# 财务质量阈值（预留，Phase 2 填充详细财务数据）
+financial_quality:
+  min_roe: 12
+  min_gross_margin: 20
+  min_net_margin: 8
+  max_debt_ratio: 60
+  min_cashflow_ratio: 0.8
+  max_goodwill_ratio: 20
+
+# 股权质押避雷配置
+pledge_avoidance:
+  # 是否启用大股东质押检测
+  enabled: true
+  # 质押比例阈值（%）：超过此值的股票加入避雷清单
+  # 建议：30% 为警戒线，50% 为高风险线
+  threshold_pct: 30.0
+  # 极高风险阈值（%）：超过此值直接排除，不打分
+  high_risk_pct: 50.0
+  # 是否在报告中输出避雷清单
+  report_avoid_list: true
+
+# ============================================================
+# A/H 股溢价因子配置（可选跨市场估值锚）
+# ============================================================
+ah_premium:
+  # 是否启用 A/H 溢价评分
+  enabled: true
+  # 高溢价阈值（%）：A 股相对 H 股溢价超过此值扣分
+  high_premium_threshold: 80.0
+  # 低溢价阈值（%）：低于此值加分（折价更优）
+  low_premium_threshold: 20.0
+  # 最大调整幅度
+  score_cap: 0.10
+
+# ============================================================
+# 可转债因子配置（可选辅助确认信号）
+# ============================================================
+convertible_bond:
+  # 是否启用可转债辅助信号
+  enabled: true
+  # 低溢价阈值（%）：低于此值（含负溢价）加分
+  low_premium_threshold: -2.0
+  # 高溢价阈值（%）：高于此值扣分
+  high_premium_threshold: 80.0
+  # 最大调整幅度
+  score_cap: 0.08
+
+# ============================================================
+# 筹码分布因子配置（新增）
+# ============================================================
+chip_concentration:
+  # 是否启用筹码因子（对照组：关闭）
+  enabled: false
+  # 因子权重（从技术面和资金面腾挪）
+  weight: 0.15
+
+  # 90% 成本集中度阈值（数值越低越集中）
+  concentration_90:
+    very_low: 10.0    # <=10% 视为高度集中
+    low: 20.0         # <=20% 视为较集中
+    high: 40.0        # >=40% 视为分散
+
+  # 70% 成本集中度阈值
+  concentration_70:
+    very_low: 5.0
+    low: 10.0
+    high: 25.0
+
+  # 当前价相对平均成本
+  avg_cost:
+    premium_threshold: 5.0   # 高于平均成本 5% 视为强势
+    discount_threshold: 5.0  # 低于平均成本 5% 视为弱势
+
+  # 获利比例
+  profit_ratio:
+    high: 60.0
+    low: 30.0
+
+  # 组合评分幅度
+  combination:
+    strong_concentration_bonus: 0.25
+    concentration_bonus: 0.15
+    dispersion_penalty: -0.15
+    cost_premium_bonus: 0.15
+    cost_above_bonus: 0.08
+    cost_discount_penalty: -0.15
+    low_profit_penalty: -0.10
+
+  # 单个因子得分截断
+  score_cap: 0.30
+
+# 技术指标参数
+technical:
+  ma_short: 5
+  ma_medium: 20
+  ma_long: 60
+  ma_year: 250
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  rsi_period: 14
+  rsi_overbought: 70
+  rsi_oversold: 30
+  kdj_k: 9
+  kdj_d: 3
+  kdj_j: 3
+  # 放量突破：成交量 > N日均量 × 倍数
+  volume_breakout_ma: 20
+  volume_breakout_ratio: 1.5
+  # 缩量回踩：成交量 < N日均量 × 倍数
+  volume_shrink_ma: 20
+  volume_shrink_ratio: 0.7
+
+# ============================================================
+# 新闻/情绪因子配置（新增）
+# ============================================================
+news_sentiment:
+  # 是否启用新闻/情绪分析
+  enabled: true
+
+  # 数据来源: akshare(财经媒体新闻) / tushare(交易所官方公告) / auto(双源合并)
+  data_source: akshare
+
+  # 每只股票分析的新闻条数上限
+  max_news_per_stock: 10
+
+  # 新闻最大有效时长（小时），超过此时间的新闻忽略
+  max_news_age_hours: 48
+
+  # 最少需要多少条新闻才做判断（太少则标记为数据不足）
+  min_news_count: 2
+
+  # 综合评分降级阈值（-1.0 ~ 0.0），低于此值触发降级
+  downgrade_threshold: -0.1
+
+  # 综合评分否决阈值（保留，极端情况使用）
+  negative_threshold: -0.5
+
+  # 情绪评分权重
+  score_weights:
+    news: 0.5
+    comment: 0.3
+    rating: 0.2
+
+  # 否决/降级规则
+  veto_rules:
+    enabled: true
+    # 即时否决关键词（出现即跳过挂单）
+    instant_veto_keywords:
+      - "立案"
+      - "调查"
+      - "退市"
+      - "债务违约"
+    # 负面关键词库（命中后扣分）
+    keywords:
+      - "立案"
+      - "调查"
+      - "处罚"
+      - "监管"
+      - "问询"
+      - "警示"
+      - "整改"
+      - "退市"
+      - "ST"
+      - "亏损"
+      - "业绩预亏"
+      - "业绩下滑"
+      - "营收下降"
+      - "净利润下降"
+      - "大股东减持"
+      - "高管减持"
+      - "减持计划"
+      - "清仓减持"
+      - "解禁"
+      - "合同纠纷"
+      - "诉讼"
+      - "仲裁"
+      - "赔偿"
+      - "产品召回"
+      - "停产"
+      - "整顿"
+      - "查封"
+      - "债务违约"
+      - "评级下调"
+      - "卖出评级"
+      - "减持评级"
+    # 负面新闻条数阈值：N 条以上负面新闻触发否决
+    negative_news_count_threshold: 2
+    # 研报评级下调至以下级别触发否决
+    veto_on_downgrade_to:
+      - "减持"
+      - "卖出"
+    # 评论情绪评分低于此值触发否决
+    veto_on_bearish_comment_threshold: -0.6
+
+# ============================================================
+# 预市场重要信息收集（新增）
+# ============================================================
+pre_market_info:
+  # 是否启用开盘前信息过滤
+  enabled: true
+
+  # 信息来源
+  sources:
+    - "overnight_news"         # 隔夜新闻
+    - "broker_ratings"         # 券商研报评级变化
+    - "social_sentiment"       # 社交媒体情绪
+
+  # 负面消息处理方式: veto(直接跳过挂单) / downgrade(降级)
+  action_on_negative: "downgrade"
+
+  # 降级映射
+  downgrade_map:
+    "强烈关注": "关注"
+    "关注": "轻度关注"
+    "轻度关注": "观望"
+
+  # 每日最大处理股票数（防止过度过滤）
+  max_daily_affected: 5
+
+# ============================================================
+# 买入信号权重（新增动态权重机制）
+# ============================================================
+signal_weights:
+  # 基础权重（对照组：恢复 v2.4 四因子权重，无筹码因子）
+  base:
+    fundamental: 0.20
+    technical: 0.25
+    momentum: 0.10
+    capital_flow: 0.45
+
+  # 动态权重：根据市场状态和个股趋势自动调整
+  dynamic:
+    enabled: true
+    # 强势市场（大盘在年线之上）
+    bull_trend:
+      fundamental: 0.15
+      technical: 0.30
+      momentum: 0.10
+      capital_flow: 0.45
+    # 弱势市场（大盘在年线之下）：资金面防御权重最高，动量几乎不参与
+    bear_trend:
+      fundamental: 0.25
+      technical: 0.20
+      momentum: 0.05
+      capital_flow: 0.50
+    # 震荡/不明
+    neutral:
+      fundamental: 0.20
+      technical: 0.25
+      momentum: 0.10
+      capital_flow: 0.45
+
+# ============================================================
+# 一票否决规则（新增）
+# ============================================================
+veto_rules:
+  enabled: true
+  # 符合任一规则即被排除，不进入综合评分
+  rules:
+    - name: "趋势一致向下"
+      description: "短中长期动量全部为负，说明趋势一致向下"
+      condition:
+        momentum_r5_lt: 0
+        momentum_r20_lt: 0
+        momentum_r60_lt: 0
+      action: exclude
+    - name: "主力大幅流出且中期走弱"
+      description: "主力资金大幅流出，同时20日跌幅超过5%"
+      condition:
+        capital_main_net_lt: -5000  # 万元
+        momentum_r20_lt: -5
+      action: exclude
+    - name: "顶背离死叉共振"
+      description: "MACD顶背离与死叉同时出现，技术面强烈看空"
+      condition:
+        macd_divergence_eq: "top"
+        macd_dead_eq: true
+      action: exclude
+    - name: "均线空头排列且长期走弱"
+      description: "均线空头排列且60日动量为负"
+      condition:
+        ma_bearish_eq: true
+        momentum_r60_lt: 0
+      action: exclude
+    - name: "RSI超买且短期滞涨"
+      description: "RSI超买且5日涨幅为负，说明短期回调风险大"
+      condition:
+        rsi_gt: 70
+        momentum_r5_lt: 0
+      action: exclude
+
+# ============================================================
+# 信号冲突处理（新增）
+# ============================================================
+signal_conflict:
+  enabled: true
+  # 看跌信号清单（出现任一信号时，触发保守处理）
+  bearish_priority_signals:
+    - "MACD顶背离"
+    - "MACD死叉"
+    - "均线空头排列"
+    - "RSI超买"
+    - "KDJ高位死叉"
+    - "高位放量滞涨"
+  # 出现看跌信号时，最高建议等级（强烈关注/关注/轻度关注/观望/谨慎/回避）
+  max_advice_with_bearish: "观望"
+  # 看跌信号对技术面得分的额外惩罚系数
+  bearish_penalty_multiplier: 1.5
+  # 看涨与看跌信号同时出现时，强制下调一级
+  force_downgrade_when_conflict: true
+
+# ============================================================
+# 风控参数
+# ============================================================
+risk_management:
+  # 止损计算方式：fixed(固定比例) / support_resistance(支撑/压力位)
+  stop_loss_method: fixed
+  # 固定止损比例（%），method=fixed 时使用
+  # 2026-07: 近3个月回测最大单股亏损达-8.58%，support_resistance支撑位失效，改用固定-5%止损
+  stop_loss_pct: -5.0
+  # 移动止盈回撤比例（%）
+  trailing_stop_pct: 5.0
+  # 目标价计算方式：fixed(固定比例) / support_resistance(支撑/压力位)
+  target_method: support_resistance
+  # 固定目标比例（%），method=fixed 时使用
+  target_profit_pct: 30.0
+  # 支撑位回望周期（交易日）
+  support_lookback: 20
+  # 压力位回望周期（交易日）
+  resistance_lookback: 60
+  # 跌破MA20减仓比例
+  ma20_exit_pct: 50
+  # 跌破MA60清仓
+  ma60_exit: true
+  # PE分位数止盈阈值（%）
+  pe_percentile_sell: 80
+  # 目标价与压力位冲突时，取保守值（较低者）
+  conservative_target: true
+
+# ============================================================
+# 仓位管理
+# ============================================================
+position_management:
+  # 持股数量
+  max_holdings: 10
+  min_holdings: 5
+  # 单股上限（%）
+  max_single_position: 20
+  # 极度看好单股上限（%）
+  max_conviction_position: 30
+  # 单行业上限（%）
+  max_sector_position: 30
+  # 单行业入选持仓数量上限（推荐列表中）
+  # v2.1: 从1放宽到2，提升分散度避免过度集中
+  max_sector_holdings: 2
+  # 推荐列表最少覆盖行业数
+  min_sectors_in_recommendation: 5
+  # 现金储备（%）
+  cash_reserve: 15
+
+# ============================================================
+# 开盘前挂单规划
+# ============================================================
+pre_market_order:
+  # 是否启用开盘前挂单功能
+  enabled: true
+  # 高开阈值（%）：开盘价高于前日收盘超过此比例，放弃挂单
+  gap_up_cancel_pct: 3.0
+  # 高开减仓阈值（%）：超过此比例仓位减半
+  gap_up_reduce_pct: 1.0
+  # 低开安全阈值（%）：低开不超过此比例且未破止损，视为正常
+  gap_down_safe_pct: 2.0
+  # 挂单价相对 MA20 的溢价容忍度
+  ma20_premium_max_pct: 5.0   # 收盘价偏离 MA20 超此比例，挂单价回调到 MA20+1%
+  ma20_premium_near_pct: 2.0  # 此比例内，直接以前日收盘价挂单
+
+# ============================================================
+# 大盘环境过滤
+# ============================================================
+market_environment:
+  # 上证指数需在年线之上
+  require_above_ma250: false
+  # 年线数据缺失时是否中止运行
+  abort_on_missing_index_ma250: true
+  # 北向资金近5日净流入（亿）
+  min_northbound_inflow: 0
+
+# ============================================================
+# 报告设置
+# ============================================================
+report:
+  top_n: 20
+  output_format: markdown
+  output_dir: reports/output
+  # 是否在报告中列出一票否决被排除的股票
+  report_veto_exclusions: true
+  # 一票否决显示上限
+  max_veto_exclusions: 10
+
+# ============================================================
+# 运行设置
+# ============================================================
+schedule:
+  pre_market_time: "09:00"
+  post_market_time: "15:30"
+
+# ============================================================
+# AI 财经简报解读
+# ============================================================
+ai_briefing:
+  # 是否启用 AI 简报解读
+  enabled: true
+
+  # LLM 提供商: kimi / anthropic / openai / ollama
+  llm_provider: "kimi"
+
+  # 模型选择（按提供商）
+  # kimi: moonshot-v1-8k / moonshot-v1-32k / moonshot-v1-128k
+  # kimi coding 端点通常使用: kimi-for-coding
+  # anthropic: claude-sonnet-4-6 / claude-opus-4-8 / claude-haiku-4-5
+  # openai: gpt-4o-mini / gpt-4o
+  # ollama: llama3.1 / qwen2.5 等本地模型
+  model: "kimi-for-coding"
+
+  # API Key 文件路径（相对项目根目录），留空则尝试环境变量
+  api_key_file: "config/.llm_api_key"
+
+  # OpenAI-compatible API base URL
+  api_base: "https://api.kimi.com/coding/v1/"
+
+  # LLM 调用参数
+  # 注意：部分特殊端点（如 kimi coding）只支持 temperature=1
+  temperature: 1.0
+  max_tokens: 4096
+  max_retries: 2          # JSON 解析失败/返回空时重试次数
+
+  # 新闻源配置
+  news_sources:
+    # cls_alerts 财联社接口已在 akshare 新版下线，默认改用 em_global
+    primary: "em_global"       # 东方财富全球快讯
+    fallbacks:
+      - "sina_global"          # 新浪财经全球快讯
+      - "ths_live"             # 同花顺财经直播
+      - "futu_global"          # 富途牛牛全球快讯
+      - "cls_alerts"           # 财联社（兼容旧版 akshare）
+    max_items_per_source: 200
+    max_age_hours: 24
+    min_items_threshold: 20    # 低于此数量触发 fallback
+    max_briefing_chars: 50000  # 控制 LLM token 成本
+
+  # 因子调整配置
+  factor_adjustments:
+    enabled: true
+
+    # 权重调整上限（相对于基础权重）
+    weight_shift_cap: 0.15      # 单因子权重最多偏移 ±15%
+
+    # 宏观情绪对权重的映射
+    macro_weight_map:
+      bullish:          # 宏观情绪 > 0.3
+        fundamental: 0.05
+        technical: 0.05
+        momentum: 0.05
+        capital_flow: -0.05
+      bearish:          # 宏观情绪 < -0.3
+        fundamental: 0.05
+        technical: -0.05
+        momentum: -0.05
+        capital_flow: 0.05
+      neutral:          # -0.3 <= 宏观情绪 <= 0.3
+        fundamental: 0.0
+        technical: 0.0
+        momentum: 0.0
+        capital_flow: 0.0
+
+    # 风格偏好对权重的映射
+    style_weight_map:
+      growth:           # 成长风格
+        fundamental: -0.05
+        technical: 0.05
+        momentum: 0.10
+        capital_flow: 0.0
+      value:            # 价值风格
+        fundamental: 0.10
+        technical: -0.05
+        momentum: -0.05
+        capital_flow: 0.0
+      defensive:        # 防御风格
+        fundamental: 0.10
+        technical: -0.05
+        momentum: -0.10
+        capital_flow: 0.0
+      momentum:         # 动量风格
+        fundamental: -0.05
+        technical: 0.05
+        momentum: 0.15
+        capital_flow: 0.0
+      neutral:
+        fundamental: 0.0
+        technical: 0.0
+        momentum: 0.0
+        capital_flow: 0.0
+
+    # 基本面评分调整
+    fundamental:
+      # 热门行业加分
+      hot_sector_bonus: 0.10      # 0.0 ~ 1.0
+      # 冷门行业扣分
+      cold_sector_penalty: -0.10  # -1.0 ~ 0.0
+      # 政策主题加分（个股属于政策主题行业）
+      policy_theme_bonus: 0.08
+      # 风险事件扣分（个股属于风险事件相关行业）
+      risk_event_penalty: -0.15
+
+    # 个股情绪叠加（仅对明确提及的个股）
+    stock_sentiment:
+      enabled: true
+      # 正面提及加分
+      positive_bonus: 0.15
+      # 负面提及扣分
+      negative_penalty: -0.20
+      # 中性提及不调整
+      neutral_delta: 0.0
+
+    # AI 否决/回避规则
+    veto_rules:
+      enabled: true
+      # 宏观情绪极度悲观时提高筛选门槛（可扩展）
+      bearish_macro_filter: true
+      # 极度悲观阈值
+      bearish_macro_threshold: -0.6
+
+    # 最大调整幅度（防止过度拟合）
+    max_total_score_delta: 0.20   # 综合评分最多 ±0.20
+
+  # 报告输出
+  report:
+    include_ai_summary: true
+    include_ai_signals_table: true
+
+# ============================================================
+# 回测专属配置
+# ============================================================
+backtest:
+  # 连续亏损降仓机制
+  consecutive_loss_reduction:
+    enabled: true
+    # 连续亏损多少期后触发降仓
+    threshold_consecutive_losses: 2
+    # 降仓方式: halve(减半) / max_1(最多1只)
+    reduction_method: halve
+    # 降仓后最少选股数
+    min_top_n: 1

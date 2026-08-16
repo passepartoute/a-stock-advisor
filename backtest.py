@@ -447,10 +447,11 @@ class TushareBacktester:
 
     def run_backtest(self, backtest_dates, eval_end_date=None, top_n=10,
                      advice_filter=("强烈关注", "关注"), use_weekly_hold=True,
-                     stop_loss_mode=None):
+                     stop_loss_mode=None, no_ma250_gate: bool = False):
         """
         运行回测
         use_weekly_hold: True=逐周持有(买入持有到下一周), False=持有到评估截止日
+        no_ma250_gate: True=年线下方也正常选股（去掉"仅强烈关注"动态门槛）
         """
         if eval_end_date is None:
             eval_end_date = datetime.now()
@@ -669,9 +670,9 @@ class TushareBacktester:
             weights = self.regime_detector.get_weights_for_env(market_env)
             self.engine.set_weights(weights)
 
-            # 方案A：年线下方时只选"强烈关注"，年线上方时正常交易
+            # 方案A：年线下方时只选"强烈关注"，年线上方时正常交易（可用 --no-ma250-gate 关闭）
             ma250_state = market_env.get("above_ma250")
-            if ma250_state is False:
+            if ma250_state is False and not no_ma250_gate:
                 period_advice_filter = ("强烈关注",)
                 print(f"  [市场环境] 大盘跌破年线，选股门槛升至: 强烈关注")
             else:
@@ -1800,6 +1801,8 @@ def main():
                         help="配置文件路径 (默认: config/settings.yaml)")
     parser.add_argument("--demo", action="store_true",
                         help="使用模拟数据快速验证回测逻辑")
+    parser.add_argument("--no-ma250-gate", action="store_true",
+                        help="年线下方也正常选股（去掉仅强烈关注的动态门槛）")
     args = parser.parse_args()
 
     if args.demo:
@@ -1883,7 +1886,8 @@ def main():
     # 运行回测
     try:
         bt.run_backtest(weekly_dates, eval_end, top_n=args.top,
-                        use_weekly_hold=use_weekly, stop_loss_mode=sl_mode)
+                        use_weekly_hold=use_weekly, stop_loss_mode=sl_mode,
+                        no_ma250_gate=args.no_ma250_gate)
     except KeyboardInterrupt:
         print("\n\n用户中断回测")
     except Exception as e:
