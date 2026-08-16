@@ -449,17 +449,26 @@ def main(use_mock: bool = False):
         print(f"     [演示模式] 跳过")
 
     # 3. 获取资金面数据（批量）
+    # 注意：2026-08 回测验证（6个月, n=100+）真实主力资金流在周度尺度为反指(IC-0.12)，
+    # 默认关闭 moneyflow/top_list/top_inst，资金面仅用换手率/量比代理。
     print("\n[3/5] 获取资金面数据...")
     candidate_codes = candidates["代码"].astype(str).tolist()
-    moneyflow_df = fetcher.get_moneyflow_data(candidate_codes)
-    top_list_df = fetcher.get_top_list_data()
-    top_inst_df = fetcher.get_top_inst_data()
-    if not moneyflow_df.empty:
-        print(f"     资金流向: {len(moneyflow_df)} 只")
-    if not top_list_df.empty:
-        print(f"     龙虎榜: {len(top_list_df)} 只")
-    if not top_inst_df.empty:
-        print(f"     机构席位: {len(top_inst_df)} 只")
+    cf_cfg = config.get("capital_flow", {})
+    if cf_cfg.get("use_moneyflow", False):
+        moneyflow_df = fetcher.get_moneyflow_data(candidate_codes)
+        top_list_df = fetcher.get_top_list_data()
+        top_inst_df = fetcher.get_top_inst_data()
+        if not moneyflow_df.empty:
+            print(f"     资金流向: {len(moneyflow_df)} 只")
+        if not top_list_df.empty:
+            print(f"     龙虎榜: {len(top_list_df)} 只")
+        if not top_inst_df.empty:
+            print(f"     机构席位: {len(top_inst_df)} 只")
+    else:
+        moneyflow_df = pd.DataFrame()
+        top_list_df = pd.DataFrame()
+        top_inst_df = pd.DataFrame()
+        print("     资金流向已停用（回测验证为反指），仅使用换手率/量比")
 
     # 3.4 获取筹码分布数据
     print("\n[3.4/5] 获取筹码分布数据...")

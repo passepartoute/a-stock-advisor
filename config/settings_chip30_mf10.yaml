@@ -230,15 +230,6 @@ chip_concentration:
   # 单个因子得分截断
   score_cap: 0.30
 
-# ============================================================
-# 资金面数据源配置
-# ============================================================
-capital_flow:
-  # 是否使用 tushare 资金流向/龙虎榜数据
-  # 2026-08 回测验证（6个月）：真实主力资金流在周度尺度为反指(IC-0.12)，
-  # 关闭后入选股票跑赢池子+4.95pp。默认关闭，仅用换手率/量比代理。
-  use_moneyflow: false
-
 # 技术指标参数
 technical:
   ma_short: 5
@@ -372,41 +363,41 @@ pre_market_info:
 # 买入信号权重（新增动态权重机制）
 # ============================================================
 signal_weights:
-  # 基础权重
-  # v2.4: 基于2026-06月回测IC — 技术面(IC+0.71)显著正向, 基本面(IC-0.26)反向,
-  #       资金面(IC+0.33)显著正向。提权技术面, 降权基本面。
-  # v2.5: 新增筹码因子 15%，从技术面(-5%)和资金面(-10%)腾挪。
+  # 实验配置：基于2026-08满血资金面回测IC (n=100)
+  #   筹码(IC+0.59)显著正向 -> 提权至30%
+  #   资金面(IC-0.12)逆向 -> 降权至10%
+  #   基本面(IC+0.19)/技术面(IC+0.11) -> 各25%
   base:
-    fundamental: 0.20
-    technical: 0.20
+    fundamental: 0.25
+    technical: 0.25
     momentum: 0.10
-    capital_flow: 0.35
-    chip_concentration: 0.15
+    capital_flow: 0.10
+    chip_concentration: 0.30
 
   # 动态权重：根据市场状态和个股趋势自动调整
   dynamic:
     enabled: true
     # 强势市场（大盘在年线之上）
     bull_trend:
-      fundamental: 0.15
+      fundamental: 0.20
       technical: 0.25
       momentum: 0.10
-      capital_flow: 0.35
-      chip_concentration: 0.15
-    # 弱势市场（大盘在年线之下）：资金面防御权重最高，动量几乎不参与
+      capital_flow: 0.10
+      chip_concentration: 0.35
+    # 弱势市场（大盘在年线之下）：基本面防御，动量几乎不参与
     bear_trend:
-      fundamental: 0.25
-      technical: 0.15
+      fundamental: 0.30
+      technical: 0.20
       momentum: 0.05
-      capital_flow: 0.40
-      chip_concentration: 0.15
+      capital_flow: 0.15
+      chip_concentration: 0.30
     # 震荡/不明
     neutral:
-      fundamental: 0.20
-      technical: 0.20
+      fundamental: 0.25
+      technical: 0.25
       momentum: 0.10
-      capital_flow: 0.35
-      chip_concentration: 0.15
+      capital_flow: 0.10
+      chip_concentration: 0.30
 
 # ============================================================
 # 一票否决规则（新增）

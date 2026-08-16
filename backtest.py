@@ -447,11 +447,13 @@ class TushareBacktester:
 
     def run_backtest(self, backtest_dates, eval_end_date=None, top_n=10,
                      advice_filter=("强烈关注", "关注"), use_weekly_hold=True,
-                     stop_loss_mode=None, no_ma250_gate: bool = False):
+                     stop_loss_mode=None, no_ma250_gate: bool = False,
+                     no_moneyflow: bool = False):
         """
         运行回测
         use_weekly_hold: True=逐周持有(买入持有到下一周), False=持有到评估截止日
         no_ma250_gate: True=年线下方也正常选股（去掉"仅强烈关注"动态门槛）
+        no_moneyflow: True=不使用历史资金流向数据（资金面仅按换手率/量比代理评分）
         """
         if eval_end_date is None:
             eval_end_date = datetime.now()
@@ -734,14 +736,15 @@ class TushareBacktester:
                 except Exception as e:
                     print(f"  [WARN] 筹码数据获取异常: {e}，本期跳过")
 
-            # 获取本期资金流向数据（tushare moneyflow_dc 历史日期）
+            # 获取本期资金流向数据（tushare moneyflow_dc 历史日期，可用 --no-moneyflow 关闭）
             moneyflow_df = pd.DataFrame()
-            try:
-                moneyflow_df = self._aux_fetcher.get_moneyflow_data(
-                    codes=None, trade_date=period_trade_date
-                )
-            except Exception as e:
-                print(f"  [WARN] 资金流向数据获取异常: {e}，本期仅按换手率评分")
+            if not no_moneyflow:
+                try:
+                    moneyflow_df = self._aux_fetcher.get_moneyflow_data(
+                        codes=None, trade_date=period_trade_date
+                    )
+                except Exception as e:
+                    print(f"  [WARN] 资金流向数据获取异常: {e}，本期仅按换手率评分")
 
             # 本期严格筛选
             screener = FundamentalScreener(spot_period, self.config)
@@ -839,6 +842,9 @@ class TushareBacktester:
 
             daily_results.sort(key=lambda x: x["total_score"], reverse=True)
 
+            # 池诊断：为当期所有分析股票计算下期原始收益（不含成本/止损）
+            self._compute_pool_returns(daily_results, date_str, info["next_date_str"], valid_hists)
+
             filtered = [r for r in daily_results if r["advice"] in period_advice_filter]
 
             # 应用单行业持仓数量上限
@@ -908,6 +914,7 @@ class TushareBacktester:
 
         # 8. 生成报告
         print("\n[8/8] 生成回测报告...")
+        self._print_pool_diagnostic(all_results)
         self._print_report(all_results, benchmark_returns, use_weekly_hold, stop_loss_stats)
         self._save_report(all_results, benchmark_returns, backtest_dates, eval_ts, use_weekly_hold, stop_loss_stats)
         # 使用最后一期的 screener 保存避雷清单（如果有的话）
@@ -928,6 +935,79 @@ class TushareBacktester:
             self._save_avoid_list(last_screener.avoided_pledge_stocks, backtest_dates[0].strftime("%Y%m%d"))
 
         return all_results, benchmark_returns
+
+    def _compute_pool_returns(self, daily_results, date_str, next_date_str, valid_hists):
+        """为当期所有分析股票计算下期原始收益（池诊断用，不含交易成本/止损）"""
+        date_ts = pd.Timestamp(date_str)
+        next_ts = pd.Timestamp(next_date_str)
+        for r in daily_results:
+            code = r.get("code")
+            hist = valid_hists.get(code)
+            if hist is None:
+                continue
+            entry_rows = hist[hist["日期"] == date_ts]
+            if entry_rows.empty:
+                continue
+            entry = float(entry_rows.iloc[-1]["收盘"])
+            if entry <= 0:
+                continue
+            hold = hist[(hist["日期"] > date_ts) & (hist["日期"] <= next_ts)]
+            if hold.empty:
+                continue
+            exit_p = float(hold.iloc[-1]["收盘"])
+            r["pool_return_pct"] = round((exit_p - entry) / entry * 100, 2)
+
+    def _print_pool_diagnostic(self, all_results):
+        """池诊断：池均值 vs 入选均值 + 评分分桶收益（检验"池子烂"还是"排名烂"）"""
+        pool_recs = []
+        for date_str, results in all_results.items():
+            picked_codes = {p["code"] for p in results.get("filtered", [])}
+            for r in results.get("all", []):
+                ret = r.get("pool_return_pct")
+                if ret is None or r.get("veto"):
+                    continue
+                pool_recs.append({
+                    "score": r.get("total_score", 0),
+                    "return": ret,
+                    "picked": r.get("code") in picked_codes,
+                })
+
+        if len(pool_recs) < 30:
+            print("  [池诊断] 样本不足，跳过")
+            return
+
+        rets = np.array([x["return"] for x in pool_recs])
+        picked_rets = np.array([x["return"] for x in pool_recs if x["picked"]])
+
+        print(f"\n  {'='*70}")
+        print("  >> 池诊断 (所有分析股票的下期原始收益)")
+        print(f"  {'='*70}")
+        print(f"  池样本数:        {len(pool_recs)} 只/期累计")
+        print(f"  池平均收益:      {rets.mean():+.2f}%  (胜率 {np.mean(rets > 0) * 100:.0f}%)")
+        if len(picked_rets) > 0:
+            delta = picked_rets.mean() - rets.mean()
+            print(f"  入选平均(原始):  {picked_rets.mean():+.2f}%  (胜率 {np.mean(picked_rets > 0) * 100:.0f}%)")
+            print(f"  入选超额 vs 池:  {delta:+.2f}pp")
+            if delta > 0.3:
+                print("  [结论] 排名有效：入选显著好于池均值")
+            elif delta < -0.3:
+                print("  [结论] 排名帮倒忙：入选跑输池均值，因子组合需重构")
+            else:
+                print("  [结论] 排名基本无效：入选与池均值无差异，问题在池子/市场")
+
+        # 评分分桶：检验收益是否随评分单调递增
+        print(f"\n  {'分桶':<18} {'样本':<8} {'平均收益':<10} {'胜率':<8}")
+        print(f"  {'─'*50}")
+        buckets = [
+            (">=0.35 关注+", 0.35, 99),
+            ("0.15~0.35", 0.15, 0.35),
+            ("-0.15~0.15", -0.15, 0.15),
+            ("<-0.15", -99, -0.15),
+        ]
+        for label, lo, hi in buckets:
+            bucket = np.array([x["return"] for x in pool_recs if lo <= x["score"] < hi])
+            if len(bucket) > 0:
+                print(f"  {label:<18} {len(bucket):<8} {bucket.mean():>+8.2f}%  {np.mean(bucket > 0) * 100:.0f}%")
 
     def _print_factor_ic(self, all_results):
         """Phase 4: 因子IC分析 — 各因子得分与收益的秩相关系数"""
@@ -1836,6 +1916,8 @@ def main():
                         help="使用模拟数据快速验证回测逻辑")
     parser.add_argument("--no-ma250-gate", action="store_true",
                         help="年线下方也正常选股（去掉仅强烈关注的动态门槛）")
+    parser.add_argument("--no-moneyflow", action="store_true",
+                        help="回测不使用历史资金流向（资金面仅按换手率/量比代理）")
     args = parser.parse_args()
 
     if args.demo:
@@ -1920,7 +2002,8 @@ def main():
     try:
         bt.run_backtest(weekly_dates, eval_end, top_n=args.top,
                         use_weekly_hold=use_weekly, stop_loss_mode=sl_mode,
-                        no_ma250_gate=args.no_ma250_gate)
+                        no_ma250_gate=args.no_ma250_gate,
+                        no_moneyflow=args.no_moneyflow)
     except KeyboardInterrupt:
         print("\n\n用户中断回测")
     except Exception as e:
