@@ -112,20 +112,23 @@ jobs:
             rm -rf _site/.git
           fi
           cp -f reports/output/*.md _site/ 2>/dev/null || true
+          cp -f reports/output/signals_*.json _site/ 2>/dev/null || true
           cp -f viewer.html _site/viewer.html
           touch _site/.nojekyll
 
-      - name: Prune reports older than 30 days
+      - name: Prune reports older than 180 days
         run: |
-          CUTOFF=$(date -u -d '30 days ago' +%Y-%m-%d)
+          CUTOFF=$(date -u -d '180 days ago' +%Y-%m-%d)
           echo "Cutoff date: $CUTOFF"
-          for f in _site/*.md; do
+          for f in _site/*.md _site/signals_*.json; do
             [ -e "$f" ] || continue
             b=$(basename "$f")
             if [[ "$b" =~ ^report_([0-9]{4}-[0-9]{2}-[0-9]{2})\.md$ ]]; then
               fdate="${BASH_REMATCH[1]}"
             elif [[ "$b" =~ ^(backtest|avoid_list)_([0-9]{4})([0-9]{2})([0-9]{2})\.md$ ]]; then
               fdate="${BASH_REMATCH[2]}-${BASH_REMATCH[3]}-${BASH_REMATCH[4]}"
+            elif [[ "$b" =~ ^signals_([0-9]{4}-[0-9]{2}-[0-9]{2})\.json$ ]]; then
+              fdate="${BASH_REMATCH[1]}"
             else
               echo "  skip unrecognized: $b"
               continue
@@ -138,7 +141,7 @@ jobs:
 
       - name: Generate Pages index
         run: |
-          python3 .github/scripts/generate_pages_index.py _site --days 30
+          python3 .github/scripts/generate_pages_index.py _site --days 180
 
       - name: Write CNAME for custom domain
         if: vars.CUSTOM_DOMAIN != ''

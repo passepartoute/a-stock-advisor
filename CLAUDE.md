@@ -42,6 +42,9 @@ python backtest.py --demo
 # Generate mock data CSV
 python utils/mock_data.py
 
+# Factor weight IC calibration report (reads gh-pages signal archive, tushare returns)
+python calibrate_weights.py --signals-dir _pages-src --days 60
+
 # Format / lint / type check (manual, no build tool configured)
 black .
 ruff check .
@@ -176,3 +179,6 @@ If `CUSTOM_DOMAIN` is not set, the workflow falls back to the default GitHub Pag
 | P3 | Delete old SignalEngine v1 | signal_engine.py (deleted) | Code cleanup |
 | P4 | ATR inverse-volatility position weighting | technical.py, backtest.py | Major improvement: +20% cumulative |
 | P5 | MACD zero-axis filter | technical.py | Below-zero golden cross ignored (fake signal) |
+| P7 | Overheat penalty + conflict total-score penalty | signal_engine_v2.py, settings.yaml (`overheat_penalty`, `signal_conflict.total_score_penalty`) | 2026-09 review of 30-day live signals: r5>10% + RSI>60 picks had negative 5d excess; deduct 0.15 and cap advice at 观望; bearish-conflict penalty now also hits total score (was technical-only, ~-0.04 effective) |
+| P8 | AI hot-sector reversal | ai_factor_adjuster.py (`apply_hot_sector_reversal`), main.py step 5.3, settings.yaml (`hot_sector_reversal`) | 2026-09 review: AI-tagged hot sectors (semis/software) topped out when named; if candidate-pool sector median r5 > 8%, hot bonus flips to -0.10 on total score |
+| P9 | Rolling IC calibration (report-only) | utils/signal_recorder.py, calibrate_weights.py, .github/workflows/calibrate-weights.yml | Daily run now archives all candidates' factor scores as `signals_YYYY-MM-DD.json` to gh-pages; monthly job computes factor Rank IC vs 5/10d returns and publishes a suggested-weights report (no auto-apply) |

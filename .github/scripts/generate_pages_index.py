@@ -15,11 +15,13 @@ from datetime import datetime, timedelta, timezone
 
 REPORT_RE = re.compile(r"^report_(\d{4}-\d{2}-\d{2})\.md$")
 OTHER_RE = re.compile(r"^(backtest|avoid_list)_(\d{4})(\d{2})(\d{2})\.md$")
+CALIB_RE = re.compile(r"^calibration_(\d{4}-\d{2}-\d{2})\.md$")
 
 LABELS = {
     "report": "每日报告",
     "backtest": "回测报告",
     "avoid_list": "避雷清单",
+    "calibration": "校准报告",
 }
 
 
@@ -32,6 +34,9 @@ def parse_filename(name: str):
     if m:
         d = f"{m.group(2)}-{m.group(3)}-{m.group(4)}"
         return d, LABELS.get(m.group(1), "报告")
+    m = CALIB_RE.match(name)
+    if m:
+        return m.group(1), LABELS["calibration"]
     return None, None
 
 
@@ -53,7 +58,7 @@ def main():
         entries.append((d, label, name))
 
     # 按日期降序，同一天按类型固定顺序
-    type_order = {"每日报告": 0, "回测报告": 1, "避雷清单": 2}
+    type_order = {"每日报告": 0, "回测报告": 1, "避雷清单": 2, "校准报告": 3}
     entries.sort(key=lambda x: (x[0], type_order.get(x[1], 99)), reverse=True)
 
     rows = "\n".join(

@@ -5,9 +5,11 @@ AI 信号 → 量化因子调整器
 1. 因子权重调整（基于宏观情绪 + 风格偏好）
 2. 基本面行业得分调整（热门/冷门/政策/风险）
 3. 个股情绪叠加（仅对简报明确提及的个股）
+4. 热门行业反向验证（行业短期过热时，利好加分反转为减分）
 
 本模块纯函数，无外部调用，便于测试。
 """
+from statistics import median
 from typing import Dict, Any, List, Tuple, Optional
 
 
@@ -136,6 +138,65 @@ class AIFactorAdjuster:
                     f"({mentions[code].get('context', '')[:40]})"
                 )
                 count += 1
+
+        return count
+
+    def apply_hot_sector_reversal(self, results: List[Dict[str, Any]],
+                                  ai_signals: Dict[str, Any]) -> int:
+        """
+        AI 热门行业反向验证（2026-09 复盘改进#3）。
+
+        复盘发现：AI 简报点名的热门行业（半导体/AI 服务器等）在被点名时
+        往往已是短期顶部，5日超额收益显著为负。因此对"热门且短期过热"
+        的行业，把利好加分反转为对综合分的直接扣分。
+
+        行业热度用候选池内个股 5 日涨幅的中位数近似（无需额外数据源）。
+        返回实际影响的个股数量。
+        """
+        if not self.enabled or not ai_signals:
+            return 0
+
+        rev_cfg = self.fa_cfg.get("hot_sector_reversal", {})
+        if not rev_cfg.get("enabled", False):
+            return 0
+
+        hot_sectors = ai_signals.get("hot_sectors", [])
+        if not hot_sectors:
+            return 0
+
+        threshold = float(rev_cfg.get("r5_threshold", 8.0))
+        penalty = float(rev_cfg.get("penalty", -0.10))
+
+        # 候选池内各行业 5 日涨幅中位数
+        sector_r5: Dict[str, List[float]] = {}
+        for r in results:
+            sector = str(r.get("sector", "") or "")
+            r5 = r.get("details", {}).get("momentum", {}).get("r5")
+            if sector and r5 is not None:
+                sector_r5.setdefault(sector, []).append(float(r5))
+
+        overheated = {
+            sector: median(vals)
+            for sector, vals in sector_r5.items()
+            if self._sector_match(sector, hot_sectors) and median(vals) > threshold
+        }
+        if not overheated:
+            return 0
+
+        count = 0
+        for r in results:
+            sector = str(r.get("sector", "") or "")
+            if sector not in overheated:
+                continue
+            if r.get("details", {}).get("momentum", {}).get("r5") is None:
+                continue  # 无动量数据，无法判断是否追高，跳过
+            r["total_score"] = round(max(-1.0, min(1.0, r["total_score"] + penalty)), 3)
+            r["ai_hot_reversal"] = True
+            r["ai_hot_reversal_reason"] = (
+                f"AI热门行业过热: {sector} 候选池5日中位涨幅"
+                f"{overheated[sector]:.1f}% > {threshold}%"
+            )
+            count += 1
 
         return count
 

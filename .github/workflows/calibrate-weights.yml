@@ -1,0 +1,96 @@
+name: Calibrate Factor Weights
+
+# 每月 1 日 10:03 CST（02:03 UTC）生成因子 IC 校准报告
+# 只出报告、不自动改权重；人工复核后手动调整 config/settings.yaml
+on:
+  schedule:
+    - cron: '3 2 1 * *'
+
+  repository_dispatch:
+    types: [calibrate-weights]
+
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '回看窗口天数'
+        required: false
+        default: '60'
+        type: string
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup tushare token
+        run: |
+          mkdir -p config
+          echo "${{ secrets.TUSHARE_TOKEN }}" > config/.tushare_token
+
+      - name: Checkout gh-pages site (signals archive)
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: _pages-src
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run IC calibration
+        env:
+          DAYS: ${{ github.event.inputs.days || '60' }}
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          python calibrate_weights.py \
+            --signals-dir _pages-src \
+            --days "$DAYS" \
+            --output "_pages-src/calibration_${TODAY}.md"
+
+      - name: Prepare site directory
+        run: |
+          rm -rf _pages-src/.git
+          touch _pages-src/.nojekyll
+
+      - name: Regenerate Pages index
+        run: |
+          python3 .github/scripts/generate_pages_index.py _pages-src --days 180
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_pages-src
+          publish_branch: gh-pages
+          keep_files: false
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_pages-src
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

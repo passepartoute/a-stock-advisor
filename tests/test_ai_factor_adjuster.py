@@ -158,6 +158,84 @@ class TestAIFactorAdjuster(unittest.TestCase):
         self.assertTrue(any("成长" in n for n in notes))
         self.assertTrue(any("半导体" in n for n in notes))
 
+    # ---------- 改进#3：AI 热门行业反向验证 ----------
+
+    def _make_reversal_config(self, enabled=True):
+        cfg = self._make_config()
+        cfg["ai_briefing"]["factor_adjustments"]["hot_sector_reversal"] = {
+            "enabled": enabled,
+            "r5_threshold": 8.0,
+            "penalty": -0.10,
+        }
+        return cfg
+
+    @staticmethod
+    def _mk_result(code, sector, r5, total=0.30):
+        return {
+            "code": code, "name": code, "sector": sector,
+            "total_score": total,
+            "details": {"momentum": {"r5": r5}},
+        }
+
+    def test_hot_sector_reversal_applied_when_sector_overheated(self):
+        """AI 热门行业且行业5日涨幅（中位数）>8%：综合分扣分"""
+        adjuster = AIFactorAdjuster(self._make_reversal_config())
+        signals = {"hot_sectors": ["半导体"]}
+        results = [
+            self._mk_result("A", "半导体", 12.0, total=0.30),
+            self._mk_result("B", "半导体", 9.0, total=0.20),
+            self._mk_result("C", "银行", 2.0, total=0.25),
+        ]
+        # 半导体 r5 中位数 = 10.5 > 8 -> 反转；银行不在热门名单
+        count = adjuster.apply_hot_sector_reversal(results, signals)
+        self.assertEqual(count, 2)
+        self.assertAlmostEqual(results[0]["total_score"], 0.20, places=3)
+        self.assertAlmostEqual(results[1]["total_score"], 0.10, places=3)
+        self.assertAlmostEqual(results[2]["total_score"], 0.25, places=3)
+        self.assertTrue(results[0]["ai_hot_reversal"])
+        self.assertNotIn("ai_hot_reversal", results[2])
+
+    def test_hot_sector_reversal_not_triggered_when_sector_cool(self):
+        """行业5日涨幅低于阈值时不反转"""
+        adjuster = AIFactorAdjuster(self._make_reversal_config())
+        signals = {"hot_sectors": ["半导体"]}
+        results = [
+            self._mk_result("A", "半导体", 4.0),
+            self._mk_result("B", "半导体", 5.0),
+        ]
+        count = adjuster.apply_hot_sector_reversal(results, signals)
+        self.assertEqual(count, 0)
+        self.assertAlmostEqual(results[0]["total_score"], 0.30, places=3)
+
+    def test_hot_sector_reversal_disabled(self):
+        """配置关闭时不做任何调整"""
+        adjuster = AIFactorAdjuster(self._make_reversal_config(enabled=False))
+        signals = {"hot_sectors": ["半导体"]}
+        results = [self._mk_result("A", "半导体", 15.0)]
+        count = adjuster.apply_hot_sector_reversal(results, signals)
+        self.assertEqual(count, 0)
+        self.assertAlmostEqual(results[0]["total_score"], 0.30, places=3)
+
+    def test_hot_sector_reversal_no_signals(self):
+        """无 AI 信号时返回 0"""
+        adjuster = AIFactorAdjuster(self._make_reversal_config())
+        results = [self._mk_result("A", "半导体", 15.0)]
+        self.assertEqual(adjuster.apply_hot_sector_reversal(results, None), 0)
+
+    def test_hot_sector_reversal_missing_momentum_skipped(self):
+        """缺少动量数据的股票不影响行业统计，也不被扣分"""
+        adjuster = AIFactorAdjuster(self._make_reversal_config())
+        signals = {"hot_sectors": ["半导体"]}
+        results = [
+            {"code": "A", "sector": "半导体", "total_score": 0.30, "details": {}},
+            self._mk_result("B", "半导体", 12.0),
+        ]
+        count = adjuster.apply_hot_sector_reversal(results, signals)
+        # 行业统计只有 B(12.0) > 8 -> B 被扣分；A 无 r5 数据，跳过
+        self.assertEqual(count, 1)
+        self.assertAlmostEqual(results[0]["total_score"], 0.30, places=3)
+        self.assertAlmostEqual(results[1]["total_score"], 0.20, places=3)
+
 
 if __name__ == "__main__":
     unittest.main()

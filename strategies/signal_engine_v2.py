@@ -422,6 +422,11 @@ class SignalEngineV2:
             chip_result["score"] * self.weights.get("chip_concentration", 0.15)
         )
 
+        # 看跌信号冲突：除技术面惩罚外，对综合分直接扣分（2026-09 复盘改进：
+        # 冲突惩罚只作用于技术面权重，实际影响过小，高分追高股仍排在前列）
+        if conflict_result["conflict_triggered"]:
+            total -= self.conflict_cfg.get("total_score_penalty", 0.0)
+
         # 资金面如果严重流出，额外惩罚综合分（避免15%权重不够）
         main_net = cf.get("details", {}).get("主力净流入", 0)
         if main_net < -5000:
@@ -448,6 +453,22 @@ class SignalEngineV2:
 
         if below_ma250 and r20 < -5 and r60 < -10:
             total -= 0.10  # 叠加惩罚：年线下方且短中期均走弱
+
+        # 短期过热惩罚（2026-09 复盘改进：r5>10% 且 RSI 偏高的股票
+        # 5日超额收益显著为负，属于追高，扣分并限制建议等级）
+        oh_cfg = self.config.get("overheat_penalty", {})
+        overheat = False
+        if oh_cfg.get("enabled", False):
+            r5_now = momentum.get("r5", 0)
+            rsi_now = tech_details.get("rsi", 0) or 0
+            if (r5_now > oh_cfg.get("r5_threshold", 10.0)
+                    and rsi_now > oh_cfg.get("rsi_threshold", 60.0)):
+                overheat = True
+                total -= oh_cfg.get("score_penalty", 0.15)
+                technical_adjusted["signals"] = (
+                    technical_adjusted.get("signals", [])
+                    + [f"[过热]5日涨{r5_now:.1f}%+RSI{rsi_now:.0f}"]
+                )
 
         # 可转债辅助确认信号（可选）
         cb_cfg = self.config.get("convertible_bond", {})
@@ -501,9 +522,22 @@ class SignalEngineV2:
                 rank_to_advice = {v: k for k, v in advice_rank.items()}
                 advice = rank_to_advice.get(current_rank, max_advice)
 
+        # 6. 短期过热时建议等级封顶（不再额外降一级，只封顶）
+        if overheat:
+            advice_rank = {
+                "强烈关注": 5, "关注": 4, "轻度关注": 3,
+                "观望": 2, "谨慎": 1, "回避": 0
+            }
+            max_rank = advice_rank.get(oh_cfg.get("max_advice", "观望"), 2)
+            current_rank = advice_rank.get(advice, 0)
+            if current_rank > max_rank:
+                rank_to_advice = {v: k for k, v in advice_rank.items()}
+                advice = rank_to_advice.get(max_rank, "观望")
+
         return {
             "total_score": total,
             "advice": advice,
+            "overheat": overheat,
             "conflict_triggered": conflict_result["conflict_triggered"],
             "bearish_signals": conflict_result["bearish_signals"],
             "details": {

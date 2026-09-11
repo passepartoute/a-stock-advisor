@@ -317,5 +317,104 @@ class TestSignalEngineV2(unittest.TestCase):
         self.assertIn("趋势一致向下", momentum["signals"])
 
 
+class TestOverheatPenalty(unittest.TestCase):
+    """改进#1：短期过热惩罚 + 看跌信号冲突扣分升级为综合分扣分"""
+
+    def _build_config(self, overheat_enabled=True, conflict_total_penalty=0.10):
+        return {
+            "signal_weights": {
+                "base": {
+                    "fundamental": 0.25,
+                    "technical": 0.30,
+                    "momentum": 0.30,
+                    "capital_flow": 0.15,
+                    "chip_concentration": 0.0
+                }
+            },
+            "veto_rules": {"enabled": True, "rules": [
+                {"name": "RSI超买且短期滞涨",
+                 "condition": {"rsi_gt": 70, "momentum_r5_lt": 0}, "action": "exclude"}
+            ]},
+            "signal_conflict": {
+                "enabled": True,
+                "bearish_priority_signals": ["MACD死叉", "RSI超买"],
+                "max_advice_with_bearish": "观望",
+                "bearish_penalty_multiplier": 1.5,
+                "force_downgrade_when_conflict": True,
+                "total_score_penalty": conflict_total_penalty
+            },
+            "overheat_penalty": {
+                "enabled": overheat_enabled,
+                "r5_threshold": 10.0,
+                "rsi_threshold": 60.0,
+                "score_penalty": 0.15,
+                "max_advice": "观望"
+            }
+        }
+
+    def _inputs(self, r5=12.0, rsi=65.0, tech_signals=None):
+        fundamental = {"score": 0.8, "signals": []}
+        technical = {"score": 0.3, "signals": tech_signals or [],
+                     "details": {"rsi": rsi}}
+        momentum = {"score": 0.3, "signals": [f"5日强涨{r5:.1f}%"],
+                    "r5": r5, "r20": 15.0, "r60": 20.0,
+                    "trend_aligned_down": False}
+        capital = {"score": 0.0, "signals": [], "details": {"主力净流入": 0}}
+        return fundamental, technical, momentum, capital
+
+    def test_overheat_penalty_applied(self):
+        """5日涨幅>10% 且 RSI>60：综合分扣 0.15，建议封顶观望"""
+        engine = SignalEngineV2(self._build_config())
+        f, t, m, c = self._inputs(r5=12.0, rsi=65.0)
+        result = engine.combine(f, t, m, c)
+        # 基础分: 0.8*0.25 + 0.3*0.30 + 0.3*0.30 = 0.38，扣 0.15 -> 0.23
+        self.assertAlmostEqual(result["total_score"], 0.23, places=3)
+        self.assertTrue(result["overheat"])
+        self.assertEqual(result["advice"], "观望")
+
+    def test_overheat_not_triggered_when_rsi_normal(self):
+        """RSI 正常时即使涨幅大也不触发"""
+        engine = SignalEngineV2(self._build_config())
+        f, t, m, c = self._inputs(r5=12.0, rsi=55.0)
+        result = engine.combine(f, t, m, c)
+        self.assertAlmostEqual(result["total_score"], 0.38, places=3)
+        self.assertFalse(result["overheat"])
+        self.assertEqual(result["advice"], "关注")
+
+    def test_overheat_not_triggered_when_r5_small(self):
+        """涨幅不大时即使 RSI 偏高也不触发"""
+        engine = SignalEngineV2(self._build_config())
+        f, t, m, c = self._inputs(r5=5.0, rsi=65.0)
+        result = engine.combine(f, t, m, c)
+        self.assertFalse(result["overheat"])
+        self.assertAlmostEqual(result["total_score"], 0.38, places=3)
+
+    def test_overheat_disabled(self):
+        """配置关闭时不扣分不降级"""
+        engine = SignalEngineV2(self._build_config(overheat_enabled=False))
+        f, t, m, c = self._inputs(r5=12.0, rsi=65.0)
+        result = engine.combine(f, t, m, c)
+        self.assertFalse(result["overheat"])
+        self.assertAlmostEqual(result["total_score"], 0.38, places=3)
+        self.assertEqual(result["advice"], "关注")
+
+    def test_conflict_total_score_penalty(self):
+        """看跌信号冲突：除技术面惩罚外，综合分再扣 0.10"""
+        engine = SignalEngineV2(self._build_config())
+        f, t, m, c = self._inputs(r5=5.0, rsi=50.0, tech_signals=["MACD死叉"])
+        result = engine.combine(f, t, m, c)
+        # 技术面冲突惩罚: 0.3 -> 0.3-0.15=0.15
+        # 基础: 0.8*0.25 + 0.15*0.30 + 0.3*0.30 = 0.335，再扣 0.10 -> 0.235
+        self.assertTrue(result["conflict_triggered"])
+        self.assertAlmostEqual(result["total_score"], 0.235, places=3)
+
+    def test_conflict_total_penalty_zero_keeps_old_behavior(self):
+        """total_score_penalty=0 时保持旧行为（只扣技术面）"""
+        engine = SignalEngineV2(self._build_config(conflict_total_penalty=0.0))
+        f, t, m, c = self._inputs(r5=5.0, rsi=50.0, tech_signals=["MACD死叉"])
+        result = engine.combine(f, t, m, c)
+        self.assertAlmostEqual(result["total_score"], 0.335, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

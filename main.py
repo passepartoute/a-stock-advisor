@@ -639,7 +639,22 @@ def main(use_mock: bool = False):
             print(f"     AI 个股情绪叠加: {n_overlay} 只")
             results.sort(key=lambda x: x["total_score"], reverse=True)
 
+    # 5.3 AI 热门行业反向验证：行业短期过热时，利好加分反转为减分
+    if ai_adjuster and ai_signals:
+        n_reversal = ai_adjuster.apply_hot_sector_reversal(results, ai_signals)
+        if n_reversal > 0:
+            print(f"     [AI 反转] {n_reversal} 只个股因热门行业短期过热被减分")
+            results.sort(key=lambda x: x["total_score"], reverse=True)
+
     print(f"     分析完成: 共 {len(results)} 只，一票否决 {veto_count} 只，数据异常 {data_invalid_count} 只")
+
+    # 5.4 信号持久化：全部候选股因子分存为 JSON（供滚动 IC 校准，失败不影响主流程）
+    try:
+        from utils.signal_recorder import dump_signals
+        signals_path = dump_signals(results, config["report"]["output_dir"])
+        print(f"     信号数据已保存: {os.path.basename(signals_path)} ({len(results)} 条)")
+    except Exception as e:
+        print(f"     [WARN] 信号数据保存失败: {e}")
 
     # 5.5 行业分散限制
     results_for_report, div_notes = apply_sector_diversification(results, config)
