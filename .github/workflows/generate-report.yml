@@ -116,9 +116,9 @@ jobs:
           cp -f viewer.html _site/viewer.html
           touch _site/.nojekyll
 
-      - name: Prune reports older than 180 days
+      - name: Prune reports older than 730 days
         run: |
-          CUTOFF=$(date -u -d '180 days ago' +%Y-%m-%d)
+          CUTOFF=$(date -u -d '730 days ago' +%Y-%m-%d)
           echo "Cutoff date: $CUTOFF"
           for f in _site/*.md _site/signals_*.json; do
             [ -e "$f" ] || continue
@@ -141,7 +141,7 @@ jobs:
 
       - name: Generate Pages index
         run: |
-          python3 .github/scripts/generate_pages_index.py _site --days 180
+          python3 .github/scripts/generate_pages_index.py _site --days 730
 
       - name: Write CNAME for custom domain
         if: vars.CUSTOM_DOMAIN != ''

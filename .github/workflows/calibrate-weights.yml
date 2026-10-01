@@ -76,7 +76,7 @@ jobs:
 
       - name: Regenerate Pages index
         run: |
-          python3 .github/scripts/generate_pages_index.py _pages-src --days 180
+          python3 .github/scripts/generate_pages_index.py _pages-src --days 730
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
