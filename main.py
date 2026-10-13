@@ -489,6 +489,13 @@ def main(use_mock: bool = False):
     max_workers = 4 if use_mock else 6
     if not use_mock:
         import threading
+        # 优先 tushare 批量接口一次拉全市场（约2秒），
+        # 避免逐股抓新浪财报页（每股20+请求，海外 runner 常被限流）
+        bulk_n = fetcher.get_financial_indicators_bulk()
+        if bulk_n:
+            print(f"     批量财务指标: {bulk_n} 只 (tushare fina_indicator_vip)")
+        else:
+            print("     [WARN] 批量财务指标不可用，回退逐股抓取")
         fin_count = [0]
         fin_lock = threading.Lock()
         def _fetch_financial(code):

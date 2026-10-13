@@ -311,6 +311,64 @@ class DataFetcher:
 
     # ==================== 财务数据 ====================
 
+    def get_financial_indicators_bulk(self, periods: int = 2) -> int:
+        """用 tushare fina_indicator_vip 按报告期批量预取全市场财务指标。
+
+        一次调用返回一个报告期的全市场数据（~1万行，约2秒），
+        替代逐股抓新浪财报页（每股20+请求）。结果直接写入
+        self._financial_cache，后续 get_financial_indicators() 命中缓存。
+        每股取最近 periods 个报告期中最新的一期（与逐股取 iloc[0] 语义一致）。
+        返回写入缓存的股票数；失败返回 0，调用方回退逐股抓取。
+        """
+        pro = self._get_tushare_pro()
+        if pro is None:
+            return 0
+
+        # 最近 periods 个已过去的季度末报告期，新的在前
+        today = datetime.now()
+        quarter_ends = []
+        for year in (today.year, today.year - 1):
+            for month, day in ((3, 31), (6, 30), (9, 30), (12, 31)):
+                d = datetime(year, month, day)
+                if d < today:
+                    quarter_ends.append(d)
+        quarter_ends = sorted(quarter_ends, reverse=True)[:periods]
+
+        fields = ("ts_code,ann_date,end_date,update_flag,roe,"
+                  "grossprofit_margin,netprofit_margin,q_sales_yoy,"
+                  "q_netprofit_yoy,debt_to_assets")
+        loaded = 0
+        def _num(v):
+            return float(v) if v is not None and pd.notna(v) else 0.0
+        for q in quarter_ends:
+            period = q.strftime("%Y%m%d")
+            try:
+                df = pro.fina_indicator_vip(period=period, fields=fields)
+            except Exception as e:
+                print(f"     [WARN] 批量财务指标 {period} 拉取失败: {e}")
+                continue
+            if df is None or df.empty:
+                continue
+            # 同一股票可能有多行（更正公告）：优先 update_flag=1，再按公告日期取最新
+            if "update_flag" in df.columns:
+                df = df.sort_values(
+                    by=["update_flag", "ann_date"], ascending=[False, False])
+            df = df.drop_duplicates(subset="ts_code", keep="first")
+            for _, r in df.iterrows():
+                code = str(r["ts_code"])[:6]
+                if code in self._financial_cache:
+                    continue  # 更新的报告期已写入
+                self._financial_cache[code] = {
+                    "roe": _num(r.get("roe")),
+                    "gross_margin": _num(r.get("grossprofit_margin")),
+                    "net_margin": _num(r.get("netprofit_margin")),
+                    "revenue_growth": _num(r.get("q_sales_yoy")),
+                    "profit_growth_yoy": _num(r.get("q_netprofit_yoy")),
+                    "debt_ratio": _num(r.get("debt_to_assets")),
+                }
+                loaded += 1
+        return loaded
+
     def get_financial_indicators(self, symbol: str) -> dict:
         if symbol in self._financial_cache:
             return self._financial_cache[symbol]
@@ -319,7 +377,10 @@ class DataFetcher:
         try:
             if symbol.startswith("sh") or symbol.startswith("sz"):
                 symbol = symbol[2:]
-            df = ak.stock_financial_analysis_indicator(symbol=symbol)
+            # 只取最近两年的财报页（默认 start_year=1900 会逐年抓取
+            # 几十年历史页面，每股 20+ 请求，且新浪对海外 IP 限流）
+            df = ak.stock_financial_analysis_indicator(
+                symbol=symbol, start_year=str(datetime.now().year - 1))
             if df is not None and not df.empty:
                 latest = df.iloc[0]
                 result = {
