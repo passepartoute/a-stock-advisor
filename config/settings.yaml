@@ -266,7 +266,11 @@ technical:
 # ============================================================
 news_sentiment:
   # 是否启用新闻/情绪分析
-  enabled: true
+  # 2026-10 起默认关闭：唯一的新闻源 akshare（东财逐股接口）在 GitHub 美国
+  # runner 上被限流且无超时控制，导致 3.6 步卡 20~30 分钟；tushare 公告接口
+  # (anns_d) 需要更高积分不可用。若日后迁回国内 runner 或升级 tushare 积分，
+  # 可改回 enabled: true + data_source: auto
+  enabled: false
 
   # 数据来源: akshare(财经媒体新闻) / tushare(交易所官方公告) / auto(双源合并)
   data_source: akshare
