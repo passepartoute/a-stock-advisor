@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import yaml
@@ -96,18 +97,50 @@ class DataFetcherBarProvider:
         return self._load(code).get(date)
 
 
+def _fetch_index_closes(fetcher, days: int) -> Dict[str, float]:
+    """获取上证指数收盘 {date: close}。
+
+    tushare 优先（index_daily 000001.SH，与 backtest.py 同款）；
+    akshare 兜底用 stock_zh_index_daily("sh000001")。
+    绝不走 get_index_hist/stock_zh_a_hist——后者对 "000001" 返回的是
+    平安银行个股行情，基准会错成股价（2026-10-30 曾显示 11.64）。
+    """
+    closes: Dict[str, float] = {}
+    pro = None
+    try:
+        pro = fetcher._get_tushare_pro()
+    except Exception:
+        pro = None
+    if pro is not None:
+        try:
+            end = datetime.now().strftime("%Y%m%d")
+            start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+            df = pro.index_daily(ts_code="000001.SH",
+                                 start_date=start, end_date=end)
+            if df is not None and not df.empty:
+                for _, r in df.iterrows():
+                    closes[_norm_date(r["trade_date"])] = float(r["close"])
+                return closes
+        except Exception as e:
+            print(f"     [WARN] tushare 指数行情失败: {e}")
+    try:
+        import akshare as ak
+        df = ak.stock_zh_index_daily(symbol="sh000001")
+        if df is not None and not df.empty:
+            for _, r in df.iterrows():
+                closes[_norm_date(r["date"])] = float(r["close"])
+    except Exception as e:
+        print(f"     [WARN] akshare 指数行情失败: {e}")
+    return closes
+
+
 class IndexCalendar:
     """上证指数交易日历 + 基准收盘价。"""
 
-    def __init__(self, fetcher, days: int = 400):
-        self.closes: Dict[str, float] = {}
-        try:
-            df = fetcher.get_index_hist("000001", days=days)
-            if df is not None and not df.empty:
-                for _, r in df.iterrows():
-                    self.closes[_norm_date(r["日期"])] = float(r["收盘"])
-        except Exception as e:
-            print(f"     [WARN] 上证指数获取失败: {e}")
+    def __init__(self, fetcher, days: int = 760):
+        self.closes: Dict[str, float] = _fetch_index_closes(fetcher, days)
+        if not self.closes:
+            print("     [WARN] 上证指数获取失败")
 
     def trade_dates_after(self, date: Optional[str]) -> List[str]:
         """date 之后所有已有收盘行情的交易日（当天未收盘自然不在内）。"""

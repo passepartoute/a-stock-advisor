@@ -6,7 +6,8 @@ from unittest import mock
 
 import pandas as pd
 
-from paper_settle import (Bar, DataFetcherBarProvider, _resolve_data_source)
+from paper_settle import (Bar, DataFetcherBarProvider, IndexCalendar,
+                          _resolve_data_source)
 
 
 def _df(rows, with_pre_close=True):
@@ -93,6 +94,45 @@ class TestResolveDataSource(unittest.TestCase):
             self.assertEqual(
                 _resolve_data_source({"data_source": "akshare"}), "akshare")
             self.assertEqual(_resolve_data_source({}), "auto")
+
+
+class _StubPro:
+    """假 tushare pro：index_daily 返回上证指数。"""
+
+    def index_daily(self, ts_code, start_date, end_date):
+        assert ts_code == "000001.SH"
+        return pd.DataFrame({
+            "trade_date": ["20261030", "20261029"],
+            "close": [3681.47, 3651.43],
+        })
+
+
+class _StubIndexFetcher:
+    def __init__(self, pro):
+        self._pro = pro
+
+    def _get_tushare_pro(self):
+        return self._pro
+
+
+class TestIndexCalendar(unittest.TestCase):
+    def test_uses_tushare_index_daily(self):
+        cal = IndexCalendar(_StubIndexFetcher(_StubPro()))
+        # 必须是上证指数（~3600），绝不能是平安银行（股票000001，~11）
+        self.assertEqual(cal.closes["2026-10-30"], 3681.47)
+        self.assertEqual(cal.closes["2026-10-29"], 3651.43)
+
+    def test_akshare_fallback_uses_index_api(self):
+        fake_ak = mock.MagicMock()
+        fake_ak.stock_zh_index_daily.return_value = pd.DataFrame({
+            "date": ["2026-10-29", "2026-10-30"],
+            "close": [3651.43, 3681.47],
+        })
+        with mock.patch.dict("sys.modules", {"akshare": fake_ak}):
+            cal = IndexCalendar(_StubIndexFetcher(None))
+        self.assertEqual(cal.closes["2026-10-30"], 3681.47)
+        # 确认走的是指数接口，不是 stock_zh_a_hist（会返回平安银行）
+        fake_ak.stock_zh_index_daily.assert_called_once()
 
 
 if __name__ == "__main__":
