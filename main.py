@@ -694,6 +694,15 @@ def main(use_mock: bool = False):
         summary = pre_market_planner.summarize(pre_market_orders)
         print(f"     [开盘挂单] {summary}")
 
+        # 6.6 挂单持久化：存为 orders_<date>.json（供虚拟盘次日结算，失败不影响主流程）
+        if pre_market_orders:
+            try:
+                from utils.order_recorder import dump_orders
+                orders_path = dump_orders(pre_market_orders, config["report"]["output_dir"])
+                print(f"     挂单数据已保存: {os.path.basename(orders_path)} ({len(pre_market_orders)} 条)")
+            except Exception as e:
+                print(f"     [WARN] 挂单数据保存失败: {e}")
+
     reporter.print_console(results_for_report, market_env,
                            avoid_list=avoid_list, veto_list=veto_list,
                            pre_market_orders=pre_market_orders,
