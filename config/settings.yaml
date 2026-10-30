@@ -747,3 +747,26 @@ backtest:
     reduction_method: halve
     # 降仓后最少选股数
     min_top_n: 1
+
+# ============================================================
+# 虚拟盘（paper trading）
+# ============================================================
+paper_trading:
+  enabled: true
+  # 初始资金
+  initial_capital: 500000
+  # 佣金率（万1.5，双向）与最低佣金（元）
+  commission_rate: 0.00015
+  min_commission: 5.0
+  # 印花税（仅卖出）
+  stamp_tax_rate: 0.001
+  # 滑点（%），默认0
+  slippage_pct: 0.0
+  # 整手股数
+  lot_size: 100
+  # 基准指数（上证）
+  benchmark: sh000001
+  # 本地账本目录（workflow 中用 --ledger-dir 覆盖为 _site）
+  ledger_dir: reports/output/paper
+  # 说明：gap 阈值复用 pre_market_order 段，移动止盈回撤复用
+  # risk_management.trailing_stop_pct，与每日报告口径单一来源。
