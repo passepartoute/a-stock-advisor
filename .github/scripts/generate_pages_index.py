@@ -18,12 +18,14 @@ from datetime import datetime, timedelta, timezone
 REPORT_RE = re.compile(r"^report_(\d{4}-\d{2}-\d{2})\.md$")
 OTHER_RE = re.compile(r"^(backtest|avoid_list)_(\d{4})(\d{2})(\d{2})\.md$")
 CALIB_RE = re.compile(r"^calibration_(\d{4}-\d{2}-\d{2})\.md$")
+PORTFOLIO_RE = re.compile(r"^portfolio_(\d{4}-\d{2}-\d{2})\.md$")
 
 LABELS = {
     "report": "每日报告",
     "backtest": "回测报告",
     "avoid_list": "避雷清单",
     "calibration": "校准报告",
+    "portfolio": "虚拟盘",
 }
 
 
@@ -39,6 +41,9 @@ def parse_filename(name: str):
     m = CALIB_RE.match(name)
     if m:
         return m.group(1), LABELS["calibration"]
+    m = PORTFOLIO_RE.match(name)
+    if m:
+        return m.group(1), LABELS["portfolio"]
     return None, None
 
 
