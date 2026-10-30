@@ -125,21 +125,30 @@ class SettleEngine:
 
             rate = infer_limit_rate(code, pos.get("name", ""))
             limit_down = round(bar.pre_close * (1 - rate), 2)
-            one_way_down = bar.high == bar.low == limit_down
+            # 前复权行情带多位小数，容差判定一字跌停
+            one_way_down = (abs(bar.high - limit_down) < 0.005
+                            and abs(bar.low - limit_down) < 0.005)
+
+            # 除权除息：官方昨收与持仓 last_close 不一致（>0.2%）时，
+            # 按比例下调成本/止损/目标/最高价锚点，避免除息缺口假触发。
+            # 红利现金本身不计入（口径偏保守）。
+            self._adjust_for_dividend(pos, bar)
 
             # 移动止盈线用截至 T-1 的最高价，避免用当日 high 产生前视
             trail = round(pos["highest_price"]
                           * (1 - self.cfg.trailing_stop_pct / 100), 2)
 
+            stop = pos.get("stop_loss_price")
+            target = pos.get("target_price")
             sell_price, reason = None, None
-            if bar.low <= pos["stop_loss_price"]:
-                sell_price = min(bar.open, pos["stop_loss_price"])
+            if stop and bar.low <= stop:
+                sell_price = min(bar.open, stop)
                 reason = "止损"
             elif trail > pos["cost_price"] and bar.low <= trail:
                 sell_price = min(bar.open, trail)
                 reason = "移动止盈"
-            elif bar.high >= pos["target_price"]:
-                sell_price = max(bar.open, pos["target_price"])
+            elif target and bar.high >= target:
+                sell_price = max(bar.open, target)
                 reason = "目标价"
 
             if sell_price is not None and not one_way_down:
@@ -151,6 +160,21 @@ class SettleEngine:
             # 未卖出：更新持仓期最高价与最新收盘
             pos["highest_price"] = max(pos["highest_price"], bar.high)
             pos["last_close"] = bar.close
+
+    @staticmethod
+    def _adjust_for_dividend(pos: Dict, bar: Bar) -> None:
+        """除权除息锚点调整：官方昨收与持仓 last_close 偏差 >0.2% 时，
+        按比例下调全部价格锚点（成本/买入价/止损/目标/最高价）。"""
+        last = pos.get("last_close")
+        if not bar.pre_close or not last:
+            return
+        ratio = bar.pre_close / last
+        if abs(ratio - 1) <= 0.002:
+            return
+        for key in ("cost_price", "buy_price", "stop_loss_price",
+                    "target_price", "highest_price"):
+            if pos.get(key):
+                pos[key] = round(pos[key] * ratio, 2)
 
     def _do_sell(self, portfolio: Portfolio, pos: Dict, date: str,
                  price: float, reason: str,
@@ -206,7 +230,7 @@ class SettleEngine:
             if gap_pct > self.cfg.gap_up_reduce_pct:
                 position_pct = position_pct / 2
                 reason = "挂单成交(高开减半)"
-            if bar.open < order.get("stop_loss_price", 0):
+            if bar.open < (order.get("stop_loss_price") or 0):
                 unfilled.append(self._unfill(order, "低开破止损"))
                 continue
 

@@ -140,6 +140,7 @@ def render_daily_report(portfolio: Portfolio, day_result: Dict,
         "---",
         "",
         "**说明**：虚拟盘为模拟结算（次日挂单成交假设 + 双边费用），"
-        "用于策略复盘，不构成投资建议。",
+        "用于策略复盘，不构成投资建议。"
+        "除权除息日按官方昨收比例调整持仓锚点，红利现金不计入（口径偏保守）。",
     ]
     return "\n".join(lines) + "\n"

@@ -266,6 +266,43 @@ class TestSellRules(unittest.TestCase):
         self.assertEqual(result["trades"], [])
         self.assertIn("600519", p.positions)
 
+    def test_one_way_limit_down_tolerant_of_qfq_decimals(self):
+        # 前复权行情带多位小数：9.004 与 limit_down=9.0 应在容差内判定为一字跌停
+        bars = {("600519", DATE): Bar(open=9.004, high=9.004, low=9.004,
+                                      close=9.004, pre_close=10.0)}
+        p = make_portfolio(positions=[make_position()])
+        result = make_engine(bars).settle(p, DATE, [])
+        self.assertEqual(result["trades"], [])
+        self.assertIn("600519", p.positions)
+
+    def test_zero_or_none_target_never_triggers(self):
+        # target_price 为 0 或 None 表示无目标价规则，不得触发卖出
+        for target in (0, None):
+            pos = make_position(target=target, highest=10.2, last_close=10.2)
+            bars = {("600519", DATE): Bar(open=10.3, high=11.0, low=10.25,
+                                          close=10.8, pre_close=10.2)}
+            p = make_portfolio(positions=[pos])
+            result = make_engine(bars).settle(p, DATE, [])
+            self.assertEqual(result["trades"], [],
+                             f"target={target} 不应触发卖出")
+            self.assertIn("600519", p.positions)
+
+    def test_dividend_gap_adjusts_position_anchors(self):
+        # 除权除息：昨收 10.0，官方 pre_close 9.5（10派5除息）。
+        # 持仓锚点应按 0.95 比例下调；止损 9.6 -> 9.12 后 low=9.55 不触发
+        pos = make_position(cost=10.0, stop=9.6, target=12.0,
+                            highest=10.5, last_close=10.0)
+        bars = {("600519", DATE): Bar(open=9.6, high=9.7, low=9.55,
+                                      close=9.65, pre_close=9.5)}
+        p = make_portfolio(positions=[pos])
+        result = make_engine(bars).settle(p, DATE, [])
+        self.assertEqual(result["trades"], [],
+                         "除权缺口不得假触发止损")
+        adj = p.positions["600519"]
+        self.assertAlmostEqual(adj["stop_loss_price"], 9.12, places=2)
+        self.assertAlmostEqual(adj["cost_price"], 9.50, places=2)
+        self.assertAlmostEqual(adj["highest_price"], 9.97, places=2)  # 10.5*0.95=9.975 浮点舍入为 9.97
+
 
 class TestSuspensionAndIdempotency(unittest.TestCase):
     def test_suspended_position_kept_and_order_skipped(self):

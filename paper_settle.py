@@ -29,6 +29,11 @@ from paper_trading.report import render_daily_report
 ORDERS_RE = re.compile(r"^orders_(\d{4}-\d{2}-\d{2})\.json$")
 
 
+def _resolve_data_source(config: Dict) -> str:
+    """数据源优先级：DATA_SOURCE 环境变量 > settings.yaml（与 main.py 一致）。"""
+    return os.environ.get("DATA_SOURCE") or config.get("data_source", "auto")
+
+
 def _norm_date(s) -> str:
     """'2026-10-30' 或 '20261030' 统一为 '2026-10-30'。"""
     s = str(s).strip()
@@ -38,32 +43,52 @@ def _norm_date(s) -> str:
 
 
 class DataFetcherBarProvider:
-    """基于 DataFetcher 的 BarProvider，按 code 懒加载并缓存日线。"""
+    """基于 DataFetcher 的 BarProvider，按 code 懒加载并缓存日线。
 
-    def __init__(self, fetcher, days: int = 400):
+    只走真实数据源（tushare 优先：原始价 + 官方昨收，可识别除权；
+    akshare 兜底：前复权，近期价格≈原始价）。绝不使用 mock 数据——
+    mock 是随机行情，入账即永久污染账本；取不到一律按停牌处理。
+    """
+
+    def __init__(self, fetcher, days: int = 760):
         self.fetcher = fetcher
         self.days = days
         self._cache: Dict[str, Dict[str, Bar]] = {}
+
+    def _fetch_df(self, code: str):
+        for method in (lambda: self.fetcher._get_hist_data_tushare(code, self.days),
+                       lambda: self.fetcher._get_hist_data_akshare(code, "daily", self.days)):
+            try:
+                df = method()
+            except Exception:
+                df = None
+            if df is not None and not df.empty:
+                return df
+        return None
 
     def _load(self, code: str) -> Dict[str, Bar]:
         if code in self._cache:
             return self._cache[code]
         bars: Dict[str, Bar] = {}
-        try:
-            df = self.fetcher.get_hist_data(code, days=self.days)
-            if df is not None and not df.empty:
-                rows = []
-                for _, r in df.iterrows():
-                    rows.append((_norm_date(r["日期"]), float(r["开盘"]),
-                                 float(r["最高"]), float(r["最低"]),
-                                 float(r["收盘"])))
-                rows.sort()
-                for i, (d, o, h, l, c) in enumerate(rows):
+        df = self._fetch_df(code)
+        if df is None:
+            print(f"     [WARN] {code} 行情获取失败，按停牌处理")
+        else:
+            has_pre = "昨收" in df.columns
+            rows = []
+            for _, r in df.iterrows():
+                pre = float(r["昨收"]) if has_pre else None
+                rows.append((_norm_date(r["日期"]),
+                             round(float(r["开盘"]), 2),
+                             round(float(r["最高"]), 2),
+                             round(float(r["最低"]), 2),
+                             round(float(r["收盘"]), 2), pre))
+            rows.sort()
+            for i, (d, o, h, l, c, pre) in enumerate(rows):
+                if pre is None:
                     pre = rows[i - 1][4] if i > 0 else o
-                    bars[d] = Bar(open=o, high=h, low=l, close=c,
-                                  pre_close=pre)
-        except Exception as e:
-            print(f"     [WARN] {code} 行情获取失败: {e}")
+                bars[d] = Bar(open=o, high=h, low=l, close=c,
+                              pre_close=pre)
         self._cache[code] = bars
         return bars
 
@@ -159,6 +184,8 @@ def main():
     parser.add_argument("--date", default=None, help="只结算指定日 YYYY-MM-DD")
     parser.add_argument("--replay", action="store_true",
                         help="重置账本并从最早挂单重放")
+    parser.add_argument("--history-days", type=int, default=760,
+                        help="行情回看窗口（自然日，需覆盖 orders 730 天保留期）")
     args = parser.parse_args()
 
     config = yaml.safe_load(open(args.config, encoding="utf-8"))
@@ -199,12 +226,12 @@ def main():
 
     from utils.data_fetcher import DataFetcher
     fetcher = DataFetcher(
-        data_source=config.get("data_source", "auto"),
+        data_source=_resolve_data_source(config),
         tushare_token=open("config/.tushare_token",
                            encoding="utf-8").read().strip()
         if os.path.exists("config/.tushare_token") else None)
-    provider = DataFetcherBarProvider(fetcher)
-    calendar = IndexCalendar(fetcher)
+    provider = DataFetcherBarProvider(fetcher, days=args.history_days)
+    calendar = IndexCalendar(fetcher, days=args.history_days)
     if not calendar.closes:
         print("[WARN] 无法获取交易日历（指数行情失败），退出")
         return

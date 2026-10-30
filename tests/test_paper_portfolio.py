@@ -69,6 +69,23 @@ class TestPortfolioPersistence(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.assertIsNone(Portfolio.load(os.path.join(d, "nope.json")))
 
+    def test_load_corrupt_file_returns_none_and_backups(self):
+        # 账本损坏（写盘被中断）时不崩溃：备份坏文件并返回 None，
+        # 调用方用追赶模式从 orders 重建
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "portfolio.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('{"cash": 123, "positions": {')  # 截断的 JSON
+            self.assertIsNone(Portfolio.load(path))
+            backups = [f for f in os.listdir(d) if "corrupt" in f]
+            self.assertEqual(len(backups), 1)
+
+    def test_save_is_atomic_no_tmp_left(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "portfolio.json")
+            Portfolio(initial_capital=100.0).save(path)
+            self.assertEqual(os.listdir(d), ["portfolio.json"])
+
     def test_saved_json_schema_keys(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "portfolio.json")

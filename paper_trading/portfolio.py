@@ -50,18 +50,33 @@ class Portfolio:
         }
 
     def save(self, path: str) -> str:
+        """原子写：先写临时文件再 os.replace，避免中断留下半个 JSON。"""
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
         return path
 
     @classmethod
     def load(cls, path: str) -> Optional["Portfolio"]:
-        """文件不存在时返回 None（由调用方决定是否初始化）。"""
+        """文件不存在或损坏时返回 None（由调用方初始化/追赶重建）。
+
+        损坏文件会备份为 <path>.corrupt-<时间戳> 以便人工检查。
+        """
         if not os.path.exists(path):
             return None
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            backup = "{}.corrupt-{}".format(
+                path, datetime.now().strftime("%Y%m%d%H%M%S"))
+            try:
+                os.replace(path, backup)
+            except OSError:
+                pass
+            return None
         p = cls(initial_capital=data["initial_capital"],
                 created_at=data.get("created_at"))
         p.version = data.get("version", SCHEMA_VERSION)

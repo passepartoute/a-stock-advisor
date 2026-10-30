@@ -122,8 +122,10 @@ jobs:
           github.event_name == 'schedule' ||
           (github.event_name == 'repository_dispatch' && github.event.action == 'daily-report') ||
           (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'daily')
+        continue-on-error: true
         run: |
           # 追赶模式：结算所有未结算的已收盘交易日；无可结算数据时正常退出
+          # 虚拟盘失败不应阻断主报告发布（次日追赶会补结算）
           python paper_settle.py --ledger-dir _site --orders-dir _site
 
       - name: Prune reports older than 730 days
