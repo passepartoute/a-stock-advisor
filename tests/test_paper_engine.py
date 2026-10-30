@@ -282,6 +282,22 @@ class TestSuspensionAndIdempotency(unittest.TestCase):
         make_engine({}).settle(p, DATE, [])
         self.assertEqual(p.last_settled_date, DATE)
 
+    def test_trades_accumulate_in_portfolio(self):
+        # 每日成交必须累积到账本 trades，否则无法跨日复盘
+        bars = {
+            ("600519", "2026-10-29"): Bar(open=10.05, high=10.2, low=9.95,
+                                          close=10.0, pre_close=10.0),
+            ("600519", DATE): Bar(open=10.1, high=10.2, low=9.4,
+                                  close=9.6, pre_close=10.0),
+        }
+        p = make_portfolio()
+        engine = make_engine(bars)
+        engine.settle(p, "2026-10-29", [make_order()])   # 买入
+        engine.settle(p, DATE, [])                        # 止损卖出
+        sides = [t["side"] for t in p.trades]
+        self.assertEqual(sides, ["BUY", "SELL"])
+        self.assertEqual(p.trades[1]["reason"], "止损")
+
 
 class TestSnapshot(unittest.TestCase):
     def test_snapshot_values(self):

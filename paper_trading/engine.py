@@ -105,6 +105,7 @@ class SettleEngine:
 
         self._settle_sells(portfolio, date, day_trades)
         self._settle_buys(portfolio, date, orders or [], day_trades, unfilled)
+        portfolio.trades.extend(day_trades)  # 成交累积到账本，供跨日复盘
         snapshot = self._take_snapshot(portfolio, date, benchmark_close)
 
         portfolio.last_settled_date = date
