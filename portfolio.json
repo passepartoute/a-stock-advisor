@@ -1,0 +1,157 @@
+{
+ "version": 1,
+ "initial_capital": 500000.0,
+ "cash": 27837.186199999953,
+ "created_at": "2026-10-30",
+ "last_settled_date": "2026-10-30",
+ "realized_pnl": 0.0,
+ "positions": {
+  "600004": {
+   "code": "600004",
+   "name": "白云机场",
+   "shares": 12600,
+   "cost_price": 7.93,
+   "buy_date": "2026-10-30",
+   "buy_price": 7.93,
+   "stop_loss_price": 7.65,
+   "target_price": 8.1,
+   "highest_price": 8.1,
+   "last_close": 8.05,
+   "buy_fee": 14.987699999999998
+  },
+  "600267": {
+   "code": "600267",
+   "name": "海正药业",
+   "shares": 7900,
+   "cost_price": 12.64,
+   "buy_date": "2026-10-30",
+   "buy_price": 12.64,
+   "stop_loss_price": 12.3,
+   "target_price": 15.0,
+   "highest_price": 13.43,
+   "last_close": 12.95,
+   "buy_fee": 14.978399999999999
+  },
+  "600009": {
+   "code": "600009",
+   "name": "上海机场",
+   "shares": 3100,
+   "cost_price": 23.62,
+   "buy_date": "2026-10-30",
+   "buy_price": 23.62,
+   "stop_loss_price": 22.91,
+   "target_price": 24.87,
+   "highest_price": 24.28,
+   "last_close": 24.12,
+   "buy_fee": 10.9833
+  },
+  "600380": {
+   "code": "600380",
+   "name": "健康元",
+   "shares": 10000,
+   "cost_price": 9.94,
+   "buy_date": "2026-10-30",
+   "buy_price": 9.94,
+   "stop_loss_price": 9.55,
+   "target_price": 10.55,
+   "highest_price": 10.12,
+   "last_close": 10.05,
+   "buy_fee": 14.909999999999998
+  },
+  "600483": {
+   "code": "600483",
+   "name": "福能股份",
+   "shares": 9300,
+   "cost_price": 10.72,
+   "buy_date": "2026-10-30",
+   "buy_price": 10.72,
+   "stop_loss_price": 10.27,
+   "target_price": 11.45,
+   "highest_price": 10.88,
+   "last_close": 10.81,
+   "buy_fee": 14.954399999999998
+  }
+ },
+ "trades": [
+  {
+   "date": "2026-10-30",
+   "code": "600004",
+   "name": "白云机场",
+   "side": "BUY",
+   "price": 7.93,
+   "shares": 12600,
+   "amount": 99918.0,
+   "commission": 14.987699999999998,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
+  },
+  {
+   "date": "2026-10-30",
+   "code": "600267",
+   "name": "海正药业",
+   "side": "BUY",
+   "price": 12.64,
+   "shares": 7900,
+   "amount": 99856.0,
+   "commission": 14.978399999999999,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
+  },
+  {
+   "date": "2026-10-30",
+   "code": "600009",
+   "name": "上海机场",
+   "side": "BUY",
+   "price": 23.62,
+   "shares": 3100,
+   "amount": 73222.0,
+   "commission": 10.9833,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
+  },
+  {
+   "date": "2026-10-30",
+   "code": "600380",
+   "name": "健康元",
+   "side": "BUY",
+   "price": 9.94,
+   "shares": 10000,
+   "amount": 99400.0,
+   "commission": 14.909999999999998,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
+  },
+  {
+   "date": "2026-10-30",
+   "code": "600483",
+   "name": "福能股份",
+   "side": "BUY",
+   "price": 10.72,
+   "shares": 9300,
+   "amount": 99696.0,
+   "commission": 14.954399999999998,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
+  }
+ ],
+ "daily_snapshots": [
+  {
+   "date": "2026-10-30",
+   "cash": 27837.19,
+   "market_value": 479540.0,
+   "total_value": 507377.19,
+   "daily_pnl": 7377.19,
+   "benchmark_close": 11.64
+  }
+ ]
+}
