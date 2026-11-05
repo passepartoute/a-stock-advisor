@@ -1,24 +1,11 @@
 {
  "version": 1,
  "initial_capital": 500000.0,
- "cash": 3104.7932499999733,
+ "cash": 5209.372700000007,
  "created_at": "2026-10-31",
- "last_settled_date": "2026-11-03",
- "realized_pnl": 2826.74,
+ "last_settled_date": "2026-11-04",
+ "realized_pnl": 11454.3,
  "positions": {
-  "600009": {
-   "code": "600009",
-   "name": "上海机场",
-   "shares": 3100,
-   "cost_price": 23.62,
-   "buy_date": "2026-10-30",
-   "buy_price": 23.62,
-   "stop_loss_price": 22.91,
-   "target_price": 24.87,
-   "highest_price": 24.79,
-   "last_close": 24.75,
-   "buy_fee": 10.9833
-  },
   "600380": {
    "code": "600380",
    "name": "健康元",
@@ -28,8 +15,8 @@
    "buy_price": 9.94,
    "stop_loss_price": 9.55,
    "target_price": 10.55,
-   "highest_price": 10.38,
-   "last_close": 10.3,
+   "highest_price": 10.47,
+   "last_close": 10.32,
    "buy_fee": 14.909999999999998
   },
   "600483": {
@@ -42,7 +29,7 @@
    "stop_loss_price": 10.27,
    "target_price": 11.45,
    "highest_price": 10.96,
-   "last_close": 10.76,
+   "last_close": 10.63,
    "buy_fee": 14.954399999999998
   },
   "601077": {
@@ -55,21 +42,21 @@
    "stop_loss_price": 6.91,
    "target_price": 7.4,
    "highest_price": 7.35,
-   "last_close": 7.09,
+   "last_close": 7.02,
    "buy_fee": 22.78035
   },
-  "688036": {
-   "code": "688036",
-   "name": "传音控股",
-   "shares": 1400,
-   "cost_price": 53.9,
-   "buy_date": "2026-11-02",
-   "buy_price": 53.9,
-   "stop_loss_price": 52.4,
-   "target_price": 65.8,
-   "highest_price": 60.46,
-   "last_close": 59.79,
-   "buy_fee": 11.318999999999999
+  "601766": {
+   "code": "601766",
+   "name": "中国中车",
+   "shares": 24100,
+   "cost_price": 6.44,
+   "buy_date": "2026-11-04",
+   "buy_price": 6.44,
+   "stop_loss_price": 6.21,
+   "target_price": 6.58,
+   "highest_price": 6.6,
+   "last_close": 6.44,
+   "buy_fee": 23.280599999999996
   }
  },
  "trades": [
@@ -198,6 +185,48 @@
    "reason": "挂单成交",
    "pnl": null,
    "pnl_pct": null
+  },
+  {
+   "date": "2026-11-04",
+   "code": "600009",
+   "name": "上海机场",
+   "side": "SELL",
+   "price": 24.87,
+   "shares": 3100,
+   "amount": 77097.0,
+   "commission": 11.564549999999999,
+   "stamp_tax": 77.09700000000001,
+   "reason": "目标价",
+   "pnl": 3775.36,
+   "pnl_pct": 5.16
+  },
+  {
+   "date": "2026-11-04",
+   "code": "688036",
+   "name": "传音控股",
+   "side": "SELL",
+   "price": 57.44,
+   "shares": 1400,
+   "amount": 80416.0,
+   "commission": 12.062399999999998,
+   "stamp_tax": 80.416,
+   "reason": "移动止盈",
+   "pnl": 4852.2,
+   "pnl_pct": 6.43
+  },
+  {
+   "date": "2026-11-04",
+   "code": "601766",
+   "name": "中国中车",
+   "side": "BUY",
+   "price": 6.44,
+   "shares": 24100,
+   "amount": 155204.0,
+   "commission": 23.280599999999996,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
   }
  ],
  "daily_snapshots": [
@@ -224,6 +253,14 @@
    "total_value": 517620.79,
    "daily_pnl": 5706.0,
    "benchmark_close": 3608.0976
+  },
+  {
+   "date": "2026-11-04",
+   "cash": 5209.37,
+   "market_value": 506789.0,
+   "total_value": 511998.37,
+   "daily_pnl": -5622.42,
+   "benchmark_close": 3686.1725
   }
  ]
 }
