@@ -1,10 +1,10 @@
 {
  "version": 1,
  "initial_capital": 500000.0,
- "cash": 5209.372700000007,
+ "cash": 50213.81315,
  "created_at": "2026-10-31",
- "last_settled_date": "2026-11-04",
- "realized_pnl": 11454.3,
+ "last_settled_date": "2026-11-05",
+ "realized_pnl": 6576.26,
  "positions": {
   "600380": {
    "code": "600380",
@@ -15,8 +15,8 @@
    "buy_price": 9.94,
    "stop_loss_price": 9.55,
    "target_price": 10.55,
-   "highest_price": 10.47,
-   "last_close": 10.32,
+   "highest_price": 10.51,
+   "last_close": 10.49,
    "buy_fee": 14.909999999999998
   },
   "600483": {
@@ -29,21 +29,8 @@
    "stop_loss_price": 10.27,
    "target_price": 11.45,
    "highest_price": 10.96,
-   "last_close": 10.63,
+   "last_close": 10.75,
    "buy_fee": 14.954399999999998
-  },
-  "601077": {
-   "code": "601077",
-   "name": "渝农商行",
-   "shares": 21300,
-   "cost_price": 7.13,
-   "buy_date": "2026-11-02",
-   "buy_price": 7.13,
-   "stop_loss_price": 6.91,
-   "target_price": 7.4,
-   "highest_price": 7.35,
-   "last_close": 7.02,
-   "buy_fee": 22.78035
   },
   "601766": {
    "code": "601766",
@@ -55,8 +42,21 @@
    "stop_loss_price": 6.21,
    "target_price": 6.58,
    "highest_price": 6.6,
-   "last_close": 6.44,
+   "last_close": 6.38,
    "buy_fee": 23.280599999999996
+  },
+  "601528": {
+   "code": "601528",
+   "name": "瑞丰银行",
+   "shares": 19100,
+   "cost_price": 5.34,
+   "buy_date": "2026-11-05",
+   "buy_price": 5.34,
+   "stop_loss_price": 5.2,
+   "target_price": 5.53,
+   "highest_price": 5.48,
+   "last_close": 5.38,
+   "buy_fee": 15.2991
   }
  },
  "trades": [
@@ -227,6 +227,34 @@
    "reason": "挂单成交",
    "pnl": null,
    "pnl_pct": null
+  },
+  {
+   "date": "2026-11-05",
+   "code": "601077",
+   "name": "渝农商行",
+   "side": "SELL",
+   "price": 6.91,
+   "shares": 21300,
+   "amount": 147183.0,
+   "commission": 22.07745,
+   "stamp_tax": 147.183,
+   "reason": "止损",
+   "pnl": -4878.04,
+   "pnl_pct": -3.21
+  },
+  {
+   "date": "2026-11-05",
+   "code": "601528",
+   "name": "瑞丰银行",
+   "side": "BUY",
+   "price": 5.34,
+   "shares": 19100,
+   "amount": 101994.0,
+   "commission": 15.2991,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
   }
  ],
  "daily_snapshots": [
@@ -261,6 +289,14 @@
    "total_value": 511998.37,
    "daily_pnl": -5622.42,
    "benchmark_close": 3686.1725
+  },
+  {
+   "date": "2026-11-05",
+   "cash": 50213.81,
+   "market_value": 461391.0,
+   "total_value": 511604.81,
+   "daily_pnl": -393.56,
+   "benchmark_close": 3689.9109
   }
  ]
 }
