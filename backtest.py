@@ -837,6 +837,8 @@ class TushareBacktester:
                 result["sector"] = str(row.get("所属行业", ""))
                 result["entry_price"] = float(day_rows.iloc[-1]["收盘"])
                 result["entry_date"] = date_str
+                # [实验] 记录60日高点，供 BT_MIN_RR 盈亏比过滤实验使用
+                result["_recent_high"] = float(hist_bt["最高"].iloc[-60:].max())
 
                 daily_results.append(result)
 
@@ -846,6 +848,33 @@ class TushareBacktester:
             self._compute_pool_returns(daily_results, date_str, info["next_date_str"], valid_hists)
 
             filtered = [r for r in daily_results if r["advice"] in period_advice_filter]
+
+            # [实验] BT_MIN_RR 环境变量：按盈亏比门槛过滤选股
+            # 盈亏比 = min(60日高点, 固定+30%) 相对现价的涨幅 ÷ 固定止损幅度
+            import os as _os
+            _min_rr = _os.environ.get("BT_MIN_RR")
+            if _min_rr:
+                _thr = float(_min_rr)
+                _sl_pct = self.config.get("risk_management", {}).get("stop_loss_pct", -5.0)
+                _kept, _dropped = [], []
+                for r in filtered:
+                    _entry = r.get("entry_price", 0)
+                    _rh = r.get("_recent_high")
+                    if not _entry or not _rh:
+                        _kept.append(r)
+                        continue
+                    _risk = _entry * (-_sl_pct / 100)
+                    _reward = min(_rh, _entry * 1.30) - _entry
+                    _rr = (_reward / _risk) if _risk > 0 else 0
+                    r["_rr"] = round(_rr, 2)
+                    if _rr >= _thr:
+                        _kept.append(r)
+                    else:
+                        _dropped.append(r)
+                if _dropped:
+                    print(f"  [实验RR>={_thr}] 排除 {_dropped and len(_dropped)} 只: "
+                          + ", ".join(f"{d['code']}{d['name']}(rr={d.get('_rr')})" for d in _dropped[:5]))
+                filtered = _kept
 
             # 应用单行业持仓数量上限
             max_sector = self.config.get("position_management", {}).get("max_sector_holdings", 2)

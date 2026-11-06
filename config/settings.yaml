@@ -510,6 +510,9 @@ risk_management:
   target_method: support_resistance
   # 固定目标比例（%），method=fixed 时使用
   target_profit_pct: 30.0
+  # 压力位距现价涨幅低于该阈值(%)时，目标价回退到固定比例（前高太近失去目标意义，
+  # 避免报告显示失真的低盈亏比；实际退出靠移动止盈）
+  target_resistance_min_pct: 10.0
   # 支撑位回望周期（交易日）
   support_lookback: 20
   # 压力位回望周期（交易日）
@@ -762,6 +765,8 @@ paper_trading:
   stamp_tax_rate: 0.001
   # 滑点（%），默认0
   slippage_pct: 0.0
+  # 允许买入的建议级别（虚拟盘只买推荐/强烈关注，轻度关注仅提示）
+  buyable_advices: ["强烈关注", "关注"]
   # 整手股数
   lot_size: 100
   # 基准指数（上证）

@@ -39,6 +39,9 @@ class SettleConfig:
     trailing_stop_pct: float = 5.0     # 移动止盈回撤（%）
     gap_up_cancel_pct: float = 3.0     # 高开取消阈值（%）
     gap_up_reduce_pct: float = 1.0     # 高开减仓阈值（%）
+    max_holdings: int = 10             # 最大持仓数（与 position_management 同源）
+    cash_reserve_pct: float = 15.0     # 现金储备下限（占昨日净值 %，与 position_management 同源）
+    buyable_advices: tuple = ("强烈关注", "关注")  # 允许买入的建议级别
 
     @classmethod
     def from_settings(cls, config: Dict) -> "SettleConfig":
@@ -46,10 +49,12 @@ class SettleConfig:
 
         费用/整手读 paper_trading 段；移动止盈与 gap 阈值复用
         risk_management / pre_market_order 段，与每日报告口径单一来源。
+        最大持仓数与现金储备复用 position_management 段。
         """
         pt = config.get("paper_trading", {}) or {}
         rm = config.get("risk_management", {}) or {}
         pm = config.get("pre_market_order", {}) or {}
+        pos = config.get("position_management", {}) or {}
         return cls(
             commission_rate=pt.get("commission_rate", 0.00015),
             min_commission=pt.get("min_commission", 5.0),
@@ -59,6 +64,9 @@ class SettleConfig:
             trailing_stop_pct=rm.get("trailing_stop_pct", 5.0),
             gap_up_cancel_pct=pm.get("gap_up_cancel_pct", 3.0),
             gap_up_reduce_pct=pm.get("gap_up_reduce_pct", 1.0),
+            max_holdings=pos.get("max_holdings", 10),
+            cash_reserve_pct=pos.get("cash_reserve", 15.0),
+            buyable_advices=tuple(pt.get("buyable_advices", ["强烈关注", "关注"])),
         )
 
 
@@ -207,8 +215,16 @@ class SettleEngine:
         for order in orders:  # 文件内顺序即报告排名 = 优先级
             code = order["code"]
             name = order.get("name", "")
+            # 只买推荐级别以上的票（默认 强烈关注/关注，轻度关注仅提示不买入）
+            if order.get("advice") not in self.cfg.buyable_advices:
+                unfilled.append(self._unfill(order, "级别不足"))
+                continue
             if code in portfolio.positions:
                 continue  # 已持仓（含当日卖出后仍持有的其他标的）
+            # 组合层面硬约束：最大持仓数
+            if len(portfolio.positions) >= self.cfg.max_holdings:
+                unfilled.append(self._unfill(order, "持仓已满"))
+                continue
             bar = self.bars.get_bar(code, date)
             if bar is None:
                 unfilled.append(self._unfill(order, "停牌"))
@@ -247,8 +263,14 @@ class SettleEngine:
                 continue
             amount = round(price * shares, 2)
             fee = self._buy_fee(amount)
-            if amount + fee > portfolio.cash:
-                unfilled.append(self._unfill(order, "现金不足"))
+            # 现金储备下限：买入后现金不得低于昨日净值的 cash_reserve_pct%
+            reserve_floor = prev_total * self.cfg.cash_reserve_pct / 100
+            available = portfolio.cash - reserve_floor
+            if amount + fee > available:
+                reason = ("现金不足（触及储备）"
+                          if (reserve_floor > 0 and amount + fee <= portfolio.cash)
+                          else "现金不足")
+                unfilled.append(self._unfill(order, reason))
                 continue
 
             portfolio.cash -= amount + fee

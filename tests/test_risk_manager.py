@@ -164,6 +164,46 @@ class TestRiskManager(unittest.TestCase):
         notes = " ".join(advice["risk_notes"])
         self.assertIn("盈亏比", notes)
 
+    # ---------- 2b. 目标价：贴前高回退 ----------
+
+    def test_target_falls_back_when_resistance_too_close(self):
+        """压力位距现价太近(<10%)时，目标价应回退到固定比例而非锚定前高"""
+        # 现价 50，60日高点 52（仅 +4%），低于默认 10% 阈值
+        hist = self._make_hist(days=100, latest_price=50.0, support=48.0, resistance=52.0)
+        advice = self.risk.get_risk_advice(
+            "000001", "测试", 50.0, 0.5, {}, hist_df=hist
+        )
+
+        fixed_target = round(50.0 * (1 + self.config["target_profit_pct"] / 100), 2)
+        self.assertEqual(advice["target_price"], fixed_target)
+        self.assertGreater(advice["target_price"], advice["resistance"])
+        notes = " ".join(advice["risk_notes"])
+        self.assertIn("压力位过近", notes)
+
+    def test_target_keeps_resistance_when_far_enough(self):
+        """压力位距离足够(>=10%)时，保守模式仍取 min(压力位, 固定目标)"""
+        # 现价 50，60日高点 56（+12%），高于默认阈值
+        hist = self._make_hist(days=100, latest_price=50.0, support=48.0, resistance=56.0)
+        advice = self.risk.get_risk_advice(
+            "000001", "测试", 50.0, 0.5, {}, hist_df=hist
+        )
+
+        self.assertAlmostEqual(advice["target_price"], 56.0, places=1)
+        self.assertLessEqual(advice["target_price"], advice["resistance"] + 0.01)
+
+    def test_target_fallback_threshold_configurable(self):
+        """回退阈值应可通过配置调整"""
+        self.config["target_resistance_min_pct"] = 15.0
+        self.risk = RiskManager(self.config)
+        # 56/50 = +12%，低于 15% 阈值 → 回退
+        hist = self._make_hist(days=100, latest_price=50.0, support=48.0, resistance=56.0)
+        advice = self.risk.get_risk_advice(
+            "000001", "测试", 50.0, 0.5, {}, hist_df=hist
+        )
+
+        fixed_target = round(50.0 * (1 + self.config["target_profit_pct"] / 100), 2)
+        self.assertEqual(advice["target_price"], fixed_target)
+
     # ---------- 3. 仓位建议 ----------
 
     def test_position_high_score(self):

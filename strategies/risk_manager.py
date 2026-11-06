@@ -15,6 +15,8 @@ class RiskManager:
         self.support_lookback = self.config.get("support_lookback", 20)
         self.resistance_lookback = self.config.get("resistance_lookback", 60)
         self.conservative_target = self.config.get("conservative_target", True)
+        # 压力位距现价涨幅低于该阈值时，前高失去目标意义，目标价回退固定比例
+        self.target_resistance_min_pct = self.config.get("target_resistance_min_pct", 10.0)
         self.ma20_exit_pct = self.config.get("ma20_exit_pct", 50)
         self.ma60_exit = self.config.get("ma60_exit", True)
         self.pe_percentile_sell = self.config.get("pe_percentile_sell", 80)
@@ -127,18 +129,30 @@ class RiskManager:
         fixed_target = round(latest_price * (1 + self.target_profit_pct / 100), 2)
         if self.target_method == "support_resistance" and sr.get("resistance"):
             resistance = sr["resistance"]
-            if self.conservative_target:
-                target_price = min(resistance, fixed_target)
+            gain_pct = (resistance - latest_price) / latest_price * 100
+            if 0 < gain_pct < self.target_resistance_min_pct:
+                # 压力位过近（如贴着前高）：前高失去目标意义，回退固定比例。
+                # 实际退出靠移动止盈（高点回撤），避免展示失真的低盈亏比。
+                target_price = fixed_target
+                advice["target_price"] = target_price
+                advice["risk_notes"].append(
+                    f"目标价: {target_price} (+{self.target_profit_pct}%, "
+                    f"压力位过近+{gain_pct:.1f}%<{self.target_resistance_min_pct}%, 回退固定比例)"
+                )
+                advice["resistance"] = resistance
             else:
-                target_price = resistance
-            target_price = round(target_price, 2)
-            gain_pct = (target_price - latest_price) / latest_price * 100
-            advice["target_price"] = target_price
-            if target_price == resistance and resistance < fixed_target:
-                advice["risk_notes"].append(f"目标价: {target_price} (+{gain_pct:.1f}%, 近期压力位，低于固定比例)")
-            else:
-                advice["risk_notes"].append(f"目标价: {target_price} (+{gain_pct:.1f}%, 压力位/固定比例)")
-            advice["resistance"] = resistance
+                if self.conservative_target:
+                    target_price = min(resistance, fixed_target)
+                else:
+                    target_price = resistance
+                target_price = round(target_price, 2)
+                gain_to_target = (target_price - latest_price) / latest_price * 100
+                advice["target_price"] = target_price
+                if target_price == resistance and resistance < fixed_target:
+                    advice["risk_notes"].append(f"目标价: {target_price} (+{gain_to_target:.1f}%, 近期压力位，低于固定比例)")
+                else:
+                    advice["risk_notes"].append(f"目标价: {target_price} (+{gain_to_target:.1f}%, 压力位/固定比例)")
+                advice["resistance"] = resistance
         else:
             advice["target_price"] = fixed_target
             advice["risk_notes"].append(f"目标价: {fixed_target} (+{self.target_profit_pct}%, 固定比例)")

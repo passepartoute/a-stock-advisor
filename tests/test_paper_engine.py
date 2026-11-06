@@ -163,9 +163,10 @@ class TestSharesAndFees(unittest.TestCase):
             ("000001", DATE): Bar(open=10.05, high=10.2, low=9.95,
                                   close=10.0, pre_close=10.0),
         }
-        # 初始 10000，现金只有 1500：第一单 budget 5000 -> 400 股 4000+5 不够；
+        # 初始 10000，现金 3000、现金储备 15%（floor=1500）-> 可用 1500：
+        # 第一单 budget 5000 -> 400 股 4000+5 不够；
         # 第二单 budget 1500 -> 100 股 1000+5 够，应成交
-        p = make_portfolio(capital=10000.0, cash=1500.0)
+        p = make_portfolio(capital=10000.0, cash=3000.0)
         orders = [make_order(position_pct=50),
                   make_order(code="000001", name="平安银行", position_pct=15)]
         result = make_engine(bars).settle(p, DATE, orders)
@@ -185,6 +186,68 @@ class TestSharesAndFees(unittest.TestCase):
         # budget = 50000*0.2 = 10000 -> 1000 股（若误用 initial 则 2000 股）
         result = make_engine(bars).settle(p, DATE, [make_order()])
         self.assertEqual(result["trades"][0]["shares"], 1000)
+
+
+class TestPortfolioConstraints(unittest.TestCase):
+    """组合层面硬约束：推荐级别过滤 / 最大持仓数 / 现金储备下限"""
+
+    def test_mild_advice_order_not_buyable(self):
+        """轻度关注不应买入，强烈关注/关注可以"""
+        bars = {("600519", DATE): Bar(open=10.0, high=10.2, low=9.95,
+                                      close=10.0, pre_close=10.0),
+                ("000001", DATE): Bar(open=10.0, high=10.2, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        p = make_portfolio()
+        orders = [make_order(name="轻度股", position_pct=10),
+                  make_order(code="000001", name="平安银行", position_pct=10)]
+        orders[0]["advice"] = "轻度关注"
+        orders[1]["advice"] = "强烈关注"
+        result = make_engine(bars).settle(p, DATE, orders)
+        self.assertEqual(len(result["trades"]), 1)
+        self.assertEqual(result["trades"][0]["code"], "000001")
+        self.assertEqual(result["unfilled"][0]["reason"], "级别不足")
+
+    def test_watch_advice_still_buyable(self):
+        """关注（非强烈）仍可买入"""
+        bars = {("600519", DATE): Bar(open=10.0, high=10.2, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        p = make_portfolio()
+        result = make_engine(bars).settle(p, DATE, [make_order()])
+        self.assertEqual(len(result["trades"]), 1)
+
+    def test_max_holdings_blocks_new_buys(self):
+        """持仓数达到上限后不再开新仓"""
+        bars = {("000002", DATE): Bar(open=10.0, high=10.2, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        positions = [make_position(code="600519"),
+                     make_position(code="000001", name="平安银行")]
+        p = make_portfolio(positions=positions)
+        order = make_order(code="000002", name="万科A", position_pct=10)
+        result = make_engine(bars, max_holdings=2).settle(p, DATE, [order])
+        self.assertEqual(result["trades"], [])
+        self.assertEqual(result["unfilled"][0]["reason"], "持仓已满")
+
+    def test_cash_reserve_floor_blocks_buy(self):
+        """买入后现金不得低于储备下限（昨日净值的 cash_reserve_pct%）"""
+        bars = {("600519", DATE): Bar(open=10.0, high=10.2, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        # 净值 100000，储备 15% -> 下限 15000；现金 20000 -> 可用 5000
+        # 单需 1000 股 * 10 + 5 = 10005 > 5000 -> 不成交
+        p = make_portfolio(capital=100000.0, cash=20000.0)
+        result = make_engine(bars, cash_reserve_pct=15.0).settle(
+            p, DATE, [make_order(position_pct=10)])
+        self.assertEqual(result["trades"], [])
+        self.assertEqual(result["unfilled"][0]["reason"], "现金不足（触及储备）")
+
+    def test_cash_reserve_allows_buy_within_floor(self):
+        """可用现金高于储备下限时正常成交"""
+        bars = {("600519", DATE): Bar(open=10.0, high=10.2, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        p = make_portfolio(capital=100000.0, cash=20000.0)
+        result = make_engine(bars, cash_reserve_pct=15.0).settle(
+            p, DATE, [make_order(position_pct=4)])
+        self.assertEqual(len(result["trades"]), 1)
+        self.assertEqual(result["trades"][0]["shares"], 400)
 
 
 class TestSellRules(unittest.TestCase):
