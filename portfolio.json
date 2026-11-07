@@ -1,24 +1,11 @@
 {
  "version": 1,
  "initial_capital": 500000.0,
- "cash": 50213.81315,
+ "cash": 161076.19009999995,
  "created_at": "2026-10-31",
- "last_settled_date": "2026-11-05",
- "realized_pnl": 6576.26,
+ "last_settled_date": "2026-11-06",
+ "realized_pnl": 15708.37,
  "positions": {
-  "600380": {
-   "code": "600380",
-   "name": "健康元",
-   "shares": 10000,
-   "cost_price": 9.94,
-   "buy_date": "2026-10-30",
-   "buy_price": 9.94,
-   "stop_loss_price": 9.55,
-   "target_price": 10.55,
-   "highest_price": 10.51,
-   "last_close": 10.49,
-   "buy_fee": 14.909999999999998
-  },
   "600483": {
    "code": "600483",
    "name": "福能股份",
@@ -28,22 +15,9 @@
    "buy_price": 10.72,
    "stop_loss_price": 10.27,
    "target_price": 11.45,
-   "highest_price": 10.96,
-   "last_close": 10.75,
+   "highest_price": 10.98,
+   "last_close": 10.87,
    "buy_fee": 14.954399999999998
-  },
-  "601766": {
-   "code": "601766",
-   "name": "中国中车",
-   "shares": 24100,
-   "cost_price": 6.44,
-   "buy_date": "2026-11-04",
-   "buy_price": 6.44,
-   "stop_loss_price": 6.21,
-   "target_price": 6.58,
-   "highest_price": 6.6,
-   "last_close": 6.38,
-   "buy_fee": 23.280599999999996
   },
   "601528": {
    "code": "601528",
@@ -55,8 +29,21 @@
    "stop_loss_price": 5.2,
    "target_price": 5.53,
    "highest_price": 5.48,
-   "last_close": 5.38,
+   "last_close": 5.43,
    "buy_fee": 15.2991
+  },
+  "603565": {
+   "code": "603565",
+   "name": "中谷物流",
+   "shares": 12300,
+   "cost_price": 12.43,
+   "buy_date": "2026-11-06",
+   "buy_price": 12.43,
+   "stop_loss_price": 12.01,
+   "target_price": 13.7,
+   "highest_price": 12.84,
+   "last_close": 12.62,
+   "buy_fee": 22.933349999999997
   }
  },
  "trades": [
@@ -255,6 +242,48 @@
    "reason": "挂单成交",
    "pnl": null,
    "pnl_pct": null
+  },
+  {
+   "date": "2026-11-06",
+   "code": "600380",
+   "name": "健康元",
+   "side": "SELL",
+   "price": 10.55,
+   "shares": 10000,
+   "amount": 105500.0,
+   "commission": 15.825,
+   "stamp_tax": 105.5,
+   "reason": "目标价",
+   "pnl": 5963.76,
+   "pnl_pct": 6.0
+  },
+  {
+   "date": "2026-11-06",
+   "code": "601766",
+   "name": "中国中车",
+   "side": "SELL",
+   "price": 6.58,
+   "shares": 24100,
+   "amount": 158578.0,
+   "commission": 23.786699999999996,
+   "stamp_tax": 158.578,
+   "reason": "目标价",
+   "pnl": 3168.35,
+   "pnl_pct": 2.04
+  },
+  {
+   "date": "2026-11-06",
+   "code": "603565",
+   "name": "中谷物流",
+   "side": "BUY",
+   "price": 12.43,
+   "shares": 12300,
+   "amount": 152889.0,
+   "commission": 22.933349999999997,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
   }
  ],
  "daily_snapshots": [
@@ -297,6 +326,14 @@
    "total_value": 511604.81,
    "daily_pnl": -393.56,
    "benchmark_close": 3689.9109
+  },
+  {
+   "date": "2026-11-06",
+   "cash": 161076.19,
+   "market_value": 360030.0,
+   "total_value": 521106.19,
+   "daily_pnl": 9501.38,
+   "benchmark_close": 3649.1774
   }
  ]
 }
