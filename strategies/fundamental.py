@@ -131,6 +131,20 @@ class FundamentalScreener:
                 )
                 df = df[mask_pre].copy()
 
+            # 行业标签大面积缺失时给出醒目警告（数据源异常信号，
+            # 下游行业分散约束会把所有股票当同一行业砍到个位数）
+            if preferred or excluded:
+                empty = df["所属行业"].apply(
+                    lambda x: pd.isna(x) or not str(x).strip() or str(x).strip().lower() == "nan"
+                ).sum()
+                if len(df) > 0 and empty / len(df) > 0.5:
+                    print(f"     [!] 严重警告: {empty}/{len(df)} 只入选股票缺少行业标签，"
+                          f"行业白/黑名单过滤可能未生效，请检查数据源完整性")
+        elif preferred or excluded:
+            print(f"     [!] 严重警告: 股票数据缺少'所属行业'列，"
+                  f"{len(preferred)}条白名单 + {len(excluded)}条黑名单行业过滤规则被静默跳过，"
+                  f"推荐列表可能集中于个别行业（2026-11-04/06 事故模式）")
+
         # 3. 市值过滤
         if "总市值" in df.columns:
             cap_min = self.mc["min"] * 1e8

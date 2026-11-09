@@ -11,6 +11,14 @@ investment_style: balanced
 # 如需使用 tushare，请将 config/.tushare_token.example 复制为 .tushare_token 并填入你的 token
 data_source: tushare
 
+# akshare 数据源总开关（默认关闭）
+# 2026-11 事故：akshare 东财行情接口的股票列表不含"所属行业"字段，auto 模式下
+# 行业白/黑名单过滤被静默跳过，行业分散约束把全部股票当成同一行业，
+# 推荐列表塌缩为 2 只（11-04/11-06 线上报告只有"强烈关注"的根因）。
+# 且 akshare 在海外 runner 上频繁限流。关闭后 auto 等价于 tushare -> mock。
+# 优先级统一为 tushare > akshare（tushare 行情带官方昨收与行业字段，schema 完整）。
+akshare_enabled: false
+
 # ============================================================
 # 数据质量校验（新增）
 # ============================================================

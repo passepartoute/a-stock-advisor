@@ -76,6 +76,34 @@ class TestFundamentalScreener(unittest.TestCase):
         self.assertNotIn("000003", codes)
         self.assertNotIn("000004", codes)
 
+    def test_screen_warns_when_industry_column_missing(self):
+        """配置了行业白/黑名单但数据缺少'所属行业'列时：过滤被跳过，
+        必须输出醒目警告而不是静默通过（2026-11-04/06 事故模式）"""
+        import io
+        from contextlib import redirect_stdout
+        data = {
+            "代码": ["000001", "000002"],
+            "名称": ["平安银行", "贵州茅台"],
+            # 故意不含"所属行业"列（模拟 akshare 东财行情接口的返回）
+            "总市值": [5e10, 5e10],
+            "市盈率": [10, 15],
+            "市净率": [1.2, 1.5],
+            "股息率": [3.0, 2.5]
+        }
+        df = self._make_spot_df(data)
+        config = self._build_config()
+        config["valuation"]["min_dividend_yield"] = 0
+        screener = FundamentalScreener(df, config)
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = screener.screen()
+
+        self.assertIn("严重警告", buf.getvalue())
+        self.assertIn("所属行业", buf.getvalue())
+        # 静默跳过过滤 = 股票全部通过硬条件（ST 排除仍会生效）
+        self.assertEqual(len(result), 2)
+
     def test_screen_sector_excluded(self):
         """应排除黑名单行业"""
         data = {

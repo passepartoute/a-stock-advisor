@@ -152,6 +152,31 @@ class TestSectorDiversification(unittest.TestCase):
         warning_notes = [n for n in notes if "低于最低要求" in n]
         self.assertEqual(len(warning_notes), 1)
 
+    def test_bypasses_sector_limit_when_sector_labels_missing(self):
+        """行业标签大面积缺失时（数据源缺行业字段），应跳过行业分散约束
+        而不是把所有股票当同一行业砍到 max_sector_holdings 只（2026-11 事故）"""
+        sectors = ["", "", "", "", "", ""]
+        results = self._make_results(sectors)
+        config = {"position_management": {"max_sector_holdings": 2, "min_sectors_in_recommendation": 3}}
+
+        filtered, notes = main.apply_sector_diversification(results, config)
+
+        # 6 只全部保留，不塌缩到 2 只
+        self.assertEqual(len(filtered), 6)
+        warning_notes = [n for n in notes if "缺少行业标签" in n]
+        self.assertEqual(len(warning_notes), 1)
+
+    def test_bypasses_sector_limit_when_sector_is_nan_string(self):
+        """sector 为 'nan'/'None' 等占位字符串时同样视为缺失"""
+        results = self._make_results(["nan", "None", "nan", "None"])
+        config = {"position_management": {"max_sector_holdings": 2, "min_sectors_in_recommendation": 3}}
+
+        filtered, notes = main.apply_sector_diversification(results, config)
+
+        self.assertEqual(len(filtered), 4)
+        warning_notes = [n for n in notes if "缺少行业标签" in n]
+        self.assertEqual(len(warning_notes), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,13 +10,19 @@ warnings.filterwarnings("ignore")
 
 class DataFetcher:
     """
-    多数据源封装：akshare(主) -> tushare(备) -> mock(兜底)
-    自动降级，任一数据源可用即可运行
+    多数据源封装：tushare(主) -> akshare(备) -> mock(兜底)
+    自动降级，任一数据源可用即可运行。
+    优先级 tushare 在前：其行情带官方昨收与行业字段，schema 完整；
+    akshare 可用 akshare_enabled 总开关禁用（见 settings.yaml）。
     """
 
-    def __init__(self, cache_dir="data", data_source="auto", tushare_token=None):
+    def __init__(self, cache_dir="data", data_source="auto", tushare_token=None,
+                 akshare_enabled=True):
         self.cache_dir = cache_dir
         self.data_source = data_source  # "auto" | "akshare" | "tushare" | "mock"
+        # akshare 总开关：False 时任何路径都不走 akshare（见其股票列表缺行业字段
+        # 导致行业过滤/分散约束静默失效的问题，settings.yaml 默认关闭）
+        self.akshare_enabled = akshare_enabled
         self._tushare_token = tushare_token or self._load_tushare_token()
         self._tushare_pro = None
         self._northbound_cache = None
@@ -88,24 +94,37 @@ class DataFetcher:
 
     # ==================== 股票列表 ====================
 
+    def _normalize_source(self, source: str) -> str:
+        """akshare 被禁用时把显式 "akshare" 归一到 "tushare"。"""
+        if source == "akshare" and not self.akshare_enabled:
+            print("     [WARN] akshare 已禁用 (akshare_enabled=false)，改用 tushare")
+            return "tushare"
+        return source
+
     def get_stock_list(self, use_mock: bool = False):
         """获取 A 股所有股票列表，含完整字段"""
         if use_mock or self.data_source == "mock":
             return self._get_mock_stock_list()
 
-        if self.data_source in ("auto", "akshare"):
-            df = self._get_stock_list_akshare()
-            if not df.empty:
-                print("     [数据源] akshare")
-                return df
-            print("     [WARN] akshare 获取失败，尝试 tushare...")
+        # 优先级：tushare > akshare。
+        # tushare 的 stock_basic 带"所属行业"，akshare 东财实时行情接口不带——
+        # auto 模式若先走 akshare，行业过滤会被静默跳过、行业分散约束随后失效
+        # （2026-11-04/06 线上报告推荐列表塌缩为 2 只的事故根因）。
+        source = self._normalize_source(self.data_source)
 
-        if self.data_source in ("auto", "tushare"):
+        if source in ("auto", "tushare"):
             df = self._get_stock_list_tushare()
             if not df.empty:
                 print("     [数据源] tushare")
                 return df
             print("     [WARN] tushare 获取失败")
+
+        if source == "auto" and self.akshare_enabled:
+            df = self._get_stock_list_akshare()
+            if not df.empty:
+                print("     [数据源] akshare")
+                return df
+            print("     [WARN] akshare 获取失败")
 
         print("     [WARN] 所有数据源均失败，使用模拟数据")
         return self._get_mock_stock_list()
@@ -133,6 +152,14 @@ class DataFetcher:
                 df = df[df["成交量"] > 0]
             if "收盘价" in df.columns:
                 df = df[df["收盘价"] > 0]
+            # 数据完整性校验：东财行情接口不含"所属行业"列，缺了它上游行业
+            # 过滤会被静默跳过、行业分散约束随后塌缩推荐列表（2026-11 事故）。
+            # 缺必需列视为获取失败，让上层降级到下一个数据源。
+            required = ("所属行业", "总市值")
+            missing = [c for c in required if c not in df.columns]
+            if missing:
+                print(f"     [WARN] akshare 股票列表缺少必需列 {missing}，视为获取失败")
+                return pd.DataFrame()
             return df.reset_index(drop=True)
         except Exception as e:
             return pd.DataFrame()
@@ -212,13 +239,16 @@ class DataFetcher:
         if use_mock or self.data_source == "mock":
             return self._get_mock_hist(days)
 
-        if self.data_source in ("auto", "akshare"):
-            df = self._get_hist_data_akshare(symbol, period, days)
+        # 优先级：tushare > akshare（原始价 + 官方昨收，与结算口径一致）
+        source = self._normalize_source(self.data_source)
+
+        if source in ("auto", "tushare"):
+            df = self._get_hist_data_tushare(symbol, days)
             if not df.empty:
                 return df
 
-        if self.data_source in ("auto", "tushare"):
-            df = self._get_hist_data_tushare(symbol, days)
+        if source == "auto" and self.akshare_enabled:
+            df = self._get_hist_data_akshare(symbol, period, days)
             if not df.empty:
                 return df
 
@@ -279,11 +309,10 @@ class DataFetcher:
     # ==================== 指数 ====================
 
     def get_index_hist(self, symbol: str = "000001", days: int = 300):
-        if self.data_source in ("auto", "akshare"):
-            df = self._get_hist_data_akshare(symbol, "daily", days)
-            if not df.empty:
-                return df
-        if self.data_source in ("auto", "tushare"):
+        # 优先级：tushare > akshare
+        source = self._normalize_source(self.data_source)
+
+        if source in ("auto", "tushare"):
             pro = self._get_tushare_pro()
             if pro:
                 try:
@@ -307,6 +336,10 @@ class DataFetcher:
                     return df
                 except Exception:
                     pass
+        if source == "auto" and self.akshare_enabled:
+            df = self._get_hist_data_akshare(symbol, "daily", days)
+            if not df.empty:
+                return df
         return pd.DataFrame()
 
     # ==================== 财务数据 ====================

@@ -260,6 +260,7 @@ def main():
     from utils.data_fetcher import DataFetcher
     fetcher = DataFetcher(
         data_source=_resolve_data_source(config),
+        akshare_enabled=config.get("akshare_enabled", True),
         tushare_token=open("config/.tushare_token",
                            encoding="utf-8").read().strip()
         if os.path.exists("config/.tushare_token") else None)

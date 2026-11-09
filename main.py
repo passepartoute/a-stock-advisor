@@ -267,6 +267,22 @@ def apply_sector_diversification(results: list, config: dict) -> tuple:
     if max_sector_h <= 0:
         return results, notes
 
+    # 数据完整性兜底：行业标签大面积缺失时（数据源缺行业字段），所有股票
+    # 会被归入同一空行业，硬套单行业上限会把推荐列表砍到 max_sector_h 只
+    # （2026-11-04/06 事故：202 只 -> 2 只，报告只剩"强烈关注"）。
+    # 此时跳过行业约束并输出醒目警告，宁可列表不分散也不塌缩。
+    def _sector_empty(s) -> bool:
+        s = str(s or "").strip().lower()
+        return not s or s in ("nan", "none")
+
+    if results:
+        empty_n = sum(1 for r in results if _sector_empty(r.get("sector")))
+        if empty_n / len(results) > 0.5:
+            notes.append(
+                f"[!] 警告: {empty_n}/{len(results)} 只推荐股票缺少行业标签，"
+                f"跳过行业分散约束（避免列表塌缩），请检查数据源完整性")
+            return results, notes
+
     sector_counts = {}
     filtered = []
 
@@ -303,6 +319,7 @@ def main(use_mock: bool = False):
     data_source = os.environ.get("DATA_SOURCE", config.get("data_source", "auto"))
     fetcher = DataFetcher(
         data_source=data_source,
+        akshare_enabled=config.get("akshare_enabled", True),
     )
     engine = SignalEngineV2(config)
     regime_detector = MarketRegimeDetector(config)

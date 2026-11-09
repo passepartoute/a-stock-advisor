@@ -50,7 +50,10 @@ class TushareBacktester:
 
         # 辅助数据 fetcher（用于 A/H 溢价、可转债等跨市场数据）
         data_source = self.config.get("data_source", "auto")
-        self._aux_fetcher = DataFetcher(data_source=data_source)
+        self._aux_fetcher = DataFetcher(
+            data_source=data_source,
+            akshare_enabled=self.config.get("akshare_enabled", True),
+        )
 
         # 缓存
         self._hist_cache = {}
