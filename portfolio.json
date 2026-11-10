@@ -1,9 +1,9 @@
 {
  "version": 1,
  "initial_capital": 500000.0,
- "cash": 161076.19009999995,
+ "cash": 84610.72199999995,
  "created_at": "2026-10-31",
- "last_settled_date": "2026-11-06",
+ "last_settled_date": "2026-11-09",
  "realized_pnl": 15708.37,
  "positions": {
   "600483": {
@@ -15,8 +15,8 @@
    "buy_price": 10.72,
    "stop_loss_price": 10.27,
    "target_price": 11.45,
-   "highest_price": 10.98,
-   "last_close": 10.87,
+   "highest_price": 11.06,
+   "last_close": 11.01,
    "buy_fee": 14.954399999999998
   },
   "601528": {
@@ -28,8 +28,8 @@
    "buy_price": 5.34,
    "stop_loss_price": 5.2,
    "target_price": 5.53,
-   "highest_price": 5.48,
-   "last_close": 5.43,
+   "highest_price": 5.5,
+   "last_close": 5.48,
    "buy_fee": 15.2991
   },
   "603565": {
@@ -42,8 +42,21 @@
    "stop_loss_price": 12.01,
    "target_price": 13.7,
    "highest_price": 12.84,
-   "last_close": 12.62,
+   "last_close": 12.45,
    "buy_fee": 22.933349999999997
+  },
+  "601688": {
+   "code": "601688",
+   "name": "华泰证券",
+   "shares": 4300,
+   "cost_price": 17.78,
+   "buy_date": "2026-11-09",
+   "buy_price": 17.78,
+   "stop_loss_price": 16.95,
+   "target_price": 19.76,
+   "highest_price": 17.85,
+   "last_close": 17.62,
+   "buy_fee": 11.4681
   }
  },
  "trades": [
@@ -284,6 +297,20 @@
    "reason": "挂单成交",
    "pnl": null,
    "pnl_pct": null
+  },
+  {
+   "date": "2026-11-09",
+   "code": "601688",
+   "name": "华泰证券",
+   "side": "BUY",
+   "price": 17.78,
+   "shares": 4300,
+   "amount": 76454.0,
+   "commission": 11.4681,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交",
+   "pnl": null,
+   "pnl_pct": null
   }
  ],
  "daily_snapshots": [
@@ -334,6 +361,14 @@
    "total_value": 521106.19,
    "daily_pnl": 9501.38,
    "benchmark_close": 3649.1774
+  },
+  {
+   "date": "2026-11-09",
+   "cash": 84610.72,
+   "market_value": 435962.0,
+   "total_value": 520572.72,
+   "daily_pnl": -533.47,
+   "benchmark_close": 3660.7917
   }
  ]
 }
