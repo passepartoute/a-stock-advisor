@@ -257,21 +257,37 @@ class SettleEngine:
 
             price = self._slip_buy(min(bar.open, suggested))
             budget = prev_total * position_pct / 100
-            shares = int(budget / price / self.cfg.lot_size) * self.cfg.lot_size
-            if shares < self.cfg.lot_size:
-                unfilled.append(self._unfill(order, "现金不足"))
-                continue
-            amount = round(price * shares, 2)
-            fee = self._buy_fee(amount)
             # 现金储备下限：买入后现金不得低于昨日净值的 cash_reserve_pct%
             reserve_floor = prev_total * self.cfg.cash_reserve_pct / 100
             available = portfolio.cash - reserve_floor
-            if amount + fee > available:
-                reason = ("现金不足（触及储备）"
-                          if (reserve_floor > 0 and amount + fee <= portfolio.cash)
-                          else "现金不足")
-                unfilled.append(self._unfill(order, reason))
+            # 目标仓位超出储备线以上可用额度时，缩量到整手成交而非整单拒绝——
+            # 否则排名靠前的大仓位单被储备线拦下、靠后的小单反而成交，
+            # 优先级倒挂（2026-11-09：30%/20% 单被拒、15% 单成交）。
+            if available <= 0:
+                unfilled.append(self._unfill(order, "现金不足（触及储备）"))
                 continue
+            budget_shares = int(budget / price / self.cfg.lot_size) * self.cfg.lot_size
+            if budget_shares < self.cfg.lot_size:
+                unfilled.append(self._unfill(order, "现金不足"))
+                continue
+            shares = int(min(budget, available) / price / self.cfg.lot_size) * self.cfg.lot_size
+            if shares < self.cfg.lot_size:
+                unfilled.append(self._unfill(order, "现金不足（触及储备）"))
+                continue
+            amount = round(price * shares, 2)
+            fee = self._buy_fee(amount)
+            # 佣金（最低 5 元）可能让总额微超可用额度，再退一手
+            while amount + fee > available and shares >= self.cfg.lot_size:
+                shares -= self.cfg.lot_size
+                if shares == 0:
+                    break
+                amount = round(price * shares, 2)
+                fee = self._buy_fee(amount)
+            if shares < self.cfg.lot_size or amount + fee > available:
+                unfilled.append(self._unfill(order, "现金不足（触及储备）"))
+                continue
+            if shares < budget_shares:
+                reason = f"{reason}（触及储备缩量）"
 
             portfolio.cash -= amount + fee
             portfolio.positions[code] = {

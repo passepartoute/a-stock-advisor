@@ -156,7 +156,8 @@ class TestSharesAndFees(unittest.TestCase):
         self.assertEqual(t["stamp_tax"], 0.0)
         self.assertEqual(p.cash, 49950.0 - 9000.0 - 5.0)
 
-    def test_cash_insufficient_skips_to_next_order(self):
+    def test_cash_shortage_downsizes_instead_of_skipping(self):
+        """目标仓位超出可用额度时缩量到整手成交，而非整单拒绝"""
         bars = {
             ("600519", DATE): Bar(open=10.05, high=10.2, low=9.95,
                                   close=10.0, pre_close=10.0),
@@ -164,15 +165,20 @@ class TestSharesAndFees(unittest.TestCase):
                                   close=10.0, pre_close=10.0),
         }
         # 初始 10000，现金 3000、现金储备 15%（floor=1500）-> 可用 1500：
-        # 第一单 budget 5000 -> 400 股 4000+5 不够；
-        # 第二单 budget 1500 -> 100 股 1000+5 够，应成交
+        # 单 budget 5000（400 股）超可用 -> 缩到 100 股(1005+5=1010)成交
         p = make_portfolio(capital=10000.0, cash=3000.0)
         orders = [make_order(position_pct=50),
                   make_order(code="000001", name="平安银行", position_pct=15)]
         result = make_engine(bars).settle(p, DATE, orders)
         self.assertEqual(len(result["trades"]), 1)
-        self.assertEqual(result["trades"][0]["code"], "000001")
-        self.assertEqual(result["unfilled"][0]["reason"], "现金不足")
+        t = result["trades"][0]
+        self.assertEqual(t["code"], "600519")
+        self.assertEqual(t["shares"], 100)
+        self.assertIn("触及储备缩量", t["reason"])
+        # 成交后现金 3000-1010=1990，floor=1500 -> 可用 490，
+        # 第二单 budget 1500 缩到不足一手 -> 拒绝
+        self.assertEqual(len(result["unfilled"]), 1)
+        self.assertEqual(result["unfilled"][0]["reason"], "现金不足（触及储备）")
 
     def test_budget_uses_last_snapshot_total_value(self):
         # 有快照时 budget 基于快照总净值而非 initial_capital
@@ -228,16 +234,33 @@ class TestPortfolioConstraints(unittest.TestCase):
         self.assertEqual(result["unfilled"][0]["reason"], "持仓已满")
 
     def test_cash_reserve_floor_blocks_buy(self):
-        """买入后现金不得低于储备下限（昨日净值的 cash_reserve_pct%）"""
+        """买入后现金不得低于储备下限（昨日净值的 cash_reserve_pct%），
+        储备线以上的可用额度连一手都买不起时拒绝"""
         bars = {("600519", DATE): Bar(open=10.0, high=10.2, low=9.95,
                                       close=10.0, pre_close=10.0)}
-        # 净值 100000，储备 15% -> 下限 15000；现金 20000 -> 可用 5000
-        # 单需 1000 股 * 10 + 5 = 10005 > 5000 -> 不成交
-        p = make_portfolio(capital=100000.0, cash=20000.0)
+        # 净值 100000，储备 15% -> 下限 15000；现金 15400 -> 可用 400 < 一手 1005
+        p = make_portfolio(capital=100000.0, cash=15400.0)
         result = make_engine(bars, cash_reserve_pct=15.0).settle(
             p, DATE, [make_order(position_pct=10)])
         self.assertEqual(result["trades"], [])
         self.assertEqual(result["unfilled"][0]["reason"], "现金不足（触及储备）")
+
+    def test_cash_reserve_downsizes_to_lot_boundary(self):
+        """目标仓位超可用额度时缩量到整手，且佣金让总额超额度时退一手"""
+        bars = {("600519", DATE): Bar(open=10.0, high=10.2, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        # 净值 100000，储备 15% -> 下限 15000；现金 20000 -> 可用 5000
+        # budget 10% = 10000（1000 股）；缩到 500 股时 5000+5 超可用 -> 退到 400 股
+        p = make_portfolio(capital=100000.0, cash=20000.0)
+        result = make_engine(bars, cash_reserve_pct=15.0).settle(
+            p, DATE, [make_order(position_pct=10)])
+        self.assertEqual(len(result["trades"]), 1)
+        t = result["trades"][0]
+        self.assertEqual(t["shares"], 400)
+        self.assertEqual(t["amount"], 4000.0)
+        self.assertIn("触及储备缩量", t["reason"])
+        # 买入后现金仍不低于储备线
+        self.assertGreaterEqual(p.cash, 15000.0)
 
     def test_cash_reserve_allows_buy_within_floor(self):
         """可用现金高于储备下限时正常成交"""
