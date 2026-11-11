@@ -1,9 +1,9 @@
 {
  "version": 1,
  "initial_capital": 500000.0,
- "cash": 84610.72199999995,
+ "cash": 78179.72199999995,
  "created_at": "2026-10-31",
- "last_settled_date": "2026-11-09",
+ "last_settled_date": "2026-11-10",
  "realized_pnl": 15708.37,
  "positions": {
   "600483": {
@@ -15,8 +15,8 @@
    "buy_price": 10.72,
    "stop_loss_price": 10.27,
    "target_price": 11.45,
-   "highest_price": 11.06,
-   "last_close": 11.01,
+   "highest_price": 11.08,
+   "last_close": 10.92,
    "buy_fee": 14.954399999999998
   },
   "601528": {
@@ -29,7 +29,7 @@
    "stop_loss_price": 5.2,
    "target_price": 5.53,
    "highest_price": 5.5,
-   "last_close": 5.48,
+   "last_close": 5.43,
    "buy_fee": 15.2991
   },
   "603565": {
@@ -42,7 +42,7 @@
    "stop_loss_price": 12.01,
    "target_price": 13.7,
    "highest_price": 12.84,
-   "last_close": 12.45,
+   "last_close": 12.42,
    "buy_fee": 22.933349999999997
   },
   "601688": {
@@ -55,8 +55,21 @@
    "stop_loss_price": 16.95,
    "target_price": 19.76,
    "highest_price": 17.85,
-   "last_close": 17.62,
+   "last_close": 17.52,
    "buy_fee": 11.4681
+  },
+  "601077": {
+   "code": "601077",
+   "name": "渝农商行",
+   "shares": 900,
+   "cost_price": 7.14,
+   "buy_date": "2026-11-10",
+   "buy_price": 7.14,
+   "stop_loss_price": 6.82,
+   "target_price": 9.33,
+   "highest_price": 7.33,
+   "last_close": 7.3,
+   "buy_fee": 5.0
   }
  },
  "trades": [
@@ -311,6 +324,20 @@
    "reason": "挂单成交",
    "pnl": null,
    "pnl_pct": null
+  },
+  {
+   "date": "2026-11-10",
+   "code": "601077",
+   "name": "渝农商行",
+   "side": "BUY",
+   "price": 7.14,
+   "shares": 900,
+   "amount": 6426.0,
+   "commission": 5.0,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交（触及储备缩量）",
+   "pnl": null,
+   "pnl_pct": null
   }
  ],
  "daily_snapshots": [
@@ -369,6 +396,14 @@
    "total_value": 520572.72,
    "daily_pnl": -533.47,
    "benchmark_close": 3660.7917
+  },
+  {
+   "date": "2026-11-10",
+   "cash": 78179.72,
+   "market_value": 439941.0,
+   "total_value": 518120.72,
+   "daily_pnl": -2452.0,
+   "benchmark_close": 3663.7235
   }
  ]
 }
