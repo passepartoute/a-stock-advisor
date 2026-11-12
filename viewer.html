@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>A-Stock 报告查看器</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- 本地固定的 marked v18.2.0 UMD 构建（lib/marked.umd.js），
+       不依赖 CDN——jsdelivr 在国内经常被墙，且外链无法锁定版本 -->
+  <script src="./marked.umd.js"></script>
   <style>
     :root {
       --bg: #f6f8fa;

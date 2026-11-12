@@ -95,6 +95,7 @@ jobs:
       - name: Copy markdown viewer
         run: |
           cp viewer.html reports/output/viewer.html
+          cp marked.umd.js reports/output/marked.umd.js
 
       - name: Checkout existing gh-pages site
         uses: actions/checkout@v4
@@ -115,6 +116,7 @@ jobs:
           cp -f reports/output/signals_*.json _site/ 2>/dev/null || true
           cp -f reports/output/orders_*.json _site/ 2>/dev/null || true
           cp -f viewer.html _site/viewer.html
+          cp -f marked.umd.js _site/marked.umd.js
           touch _site/.nojekyll
 
       - name: Settle paper trading
