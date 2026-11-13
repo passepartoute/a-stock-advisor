@@ -1,11 +1,18 @@
 name: Generate A-Stock Report
 
 on:
-  # 外部 API 触发（手机/网页/脚本）
+  # 每日定时兜底：北京时间 09:00（UTC 01:00，周一到周五）。
+  # 主力触发是 Cloudflare Worker（UTC 00:40，提前 20 分钟），但其 cron 为
+  # best effort，会偶发静默丢弃（2026-11-13 事故：当天无任何触发记录）。
+  # guard 作业检查 gh-pages 当日报告是否已存在，双触发不会重复生成。
+  schedule:
+    - cron: '0 1 * * 1-5'
+
+  # 外部 API 触发（Cloudflare Worker / 手机 / 网页 / 脚本）
   repository_dispatch:
     types: [daily-report, backtest-report]
 
-  # GitHub 网页手动触发
+  # GitHub 网页手动触发（不受 guard 去重限制，点了就一定跑）
   workflow_dispatch:
     inputs:
       report_type:
@@ -33,7 +40,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # 去重守卫：定时触发与 Worker 触发可能同日到达（concurrency 已串行化执行），
+  # 若 gh-pages 上已有当日报告则跳过，避免重复生成/重复发邮件。
+  # 仅对 schedule 和 daily-report dispatch 生效；回测与手动触发不受限制。
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check if today's report already exists on gh-pages
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          should_run=true
+          if [[ "${{ github.event_name }}" == "schedule" || \
+                ("${{ github.event_name }}" == "repository_dispatch" && "${{ github.event.action }}" == "daily-report") ]]; then
+            TODAY=$(TZ=Asia/Shanghai date +%F)
+            if gh api "repos/${{ github.repository }}/contents/report_${TODAY}.md?ref=gh-pages" --silent 2>/dev/null; then
+              echo "report_${TODAY}.md 已存在于 gh-pages（另一触发器已生成），跳过本次运行"
+              should_run=false
+            else
+              echo "gh-pages 尚无 report_${TODAY}.md，正常执行"
+            fi
+          fi
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: guard
+    if: needs.guard.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment:
