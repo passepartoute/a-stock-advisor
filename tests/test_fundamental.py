@@ -243,6 +243,127 @@ class TestFundamentalScreener(unittest.TestCase):
         self.assertIn("000001", codes)  # 股息率3.5% >= 2.0%
         self.assertNotIn("000002", codes)  # 股息率1.0% < 2.0%
 
+    def _growth_config(self):
+        """带成长行业差异化估值阈值的配置（2026-11-13 主线过滤修复）"""
+        config = self._build_config()
+        config["valuation"]["growth_override"] = {
+            "industries": ["半导体", "芯片", "通信", "电子", "元器件", "光学",
+                           "计算机", "软件", "IT", "消费电子"],
+            "max_pe": 100,
+            "max_pb": 10,
+            "min_dividend_yield": 0,
+            "max_cap": 100000,
+        }
+        return config
+
+    def test_growth_industry_pe_relaxed(self):
+        """成长行业(半导体) PE 80：全局阈值50会杀，放宽阈值100应保留；
+        非成长行业(银行)同样 PE 80 仍应被杀"""
+        data = {
+            "代码": ["000001", "000002"],
+            "名称": ["芯片龙头", "银行股"],
+            "所属行业": ["半导体", "银行"],
+            "总市值": [5e10, 5e10],
+            "市盈率": [80, 80],
+            "市净率": [3.0, 3.0],
+            "股息率": [0.0, 0.0]
+        }
+        df = self._make_spot_df(data)
+        config = self._growth_config()
+        config["stock_pool"]["preferred_sectors"] = []
+        screener = FundamentalScreener(df, config)
+        result = screener.screen()
+
+        codes = result["代码"].astype(str).tolist()
+        self.assertIn("000001", codes)   # 半导体 PE80 <= 100
+        self.assertNotIn("000002", codes)  # 银行 PE80 > 50
+
+    def test_growth_industry_pb_relaxed(self):
+        """成长行业(通信设备) PB 8：全局阈值5会杀，放宽阈值10应保留；
+        非成长行业(银行)同样 PB 8 仍应被杀"""
+        data = {
+            "代码": ["000001", "000002"],
+            "名称": ["CPO龙头", "银行股"],
+            "所属行业": ["通信设备", "银行"],
+            "总市值": [5e10, 5e10],
+            "市盈率": [30, 10],
+            "市净率": [8.0, 8.0],
+            "股息率": [0.0, 0.0]
+        }
+        df = self._make_spot_df(data)
+        config = self._growth_config()
+        config["stock_pool"]["preferred_sectors"] = []
+        config["valuation"]["min_dividend_yield"] = 0
+        screener = FundamentalScreener(df, config)
+        result = screener.screen()
+
+        codes = result["代码"].astype(str).tolist()
+        self.assertIn("000001", codes)     # 通信设备 PB8 <= 10
+        self.assertNotIn("000002", codes)  # 银行 PB8 > 5
+
+    def test_growth_industry_dividend_not_required(self):
+        """成长行业股息率 0.1%：全局下限2.0%会杀，放宽后(0)应保留"""
+        data = {
+            "代码": ["000001"],
+            "名称": ["芯片股"],
+            "所属行业": ["半导体"],
+            "总市值": [5e10],
+            "市盈率": [40],
+            "市净率": [4.0],
+            "股息率": [0.1]
+        }
+        df = self._make_spot_df(data)
+        config = self._growth_config()
+        config["stock_pool"]["preferred_sectors"] = []
+        screener = FundamentalScreener(df, config)
+        result = screener.screen()
+
+        codes = result["代码"].astype(str).tolist()
+        self.assertIn("000001", codes)
+
+    def test_growth_industry_cap_ceiling_relaxed(self):
+        """成长行业市值 3000 亿：balanced 上限 1000 亿会杀，放宽后应保留；
+        非成长行业同样市值仍应被杀"""
+        data = {
+            "代码": ["000001", "000002"],
+            "名称": ["芯片巨头", "银行巨头"],
+            "所属行业": ["半导体", "银行"],
+            "总市值": [3e12, 3e12],
+            "市盈率": [40, 10],
+            "市净率": [4.0, 1.2],
+            "股息率": [0.0, 3.0]
+        }
+        df = self._make_spot_df(data)
+        config = self._growth_config()
+        config["stock_pool"]["preferred_sectors"] = []
+        screener = FundamentalScreener(df, config)
+        result = screener.screen()
+
+        codes = result["代码"].astype(str).tolist()
+        self.assertIn("000001", codes)     # 半导体 3000亿，成长行业不封顶
+        self.assertNotIn("000002", codes)  # 银行 3000亿 > 1000亿上限
+
+    def test_growth_industry_loss_maker_still_excluded(self):
+        """成长行业亏损股(PE<=0)仍应排除：放宽的是估值上限，不是亏损底线"""
+        data = {
+            "代码": ["000001", "000002"],
+            "名称": ["亏损芯片股", "盈利芯片股"],
+            "所属行业": ["半导体", "半导体"],
+            "总市值": [5e10, 5e10],
+            "市盈率": [-5, 60],
+            "市净率": [4.0, 4.0],
+            "股息率": [0.0, 0.0]
+        }
+        df = self._make_spot_df(data)
+        config = self._growth_config()
+        config["stock_pool"]["preferred_sectors"] = []
+        screener = FundamentalScreener(df, config)
+        result = screener.screen()
+
+        codes = result["代码"].astype(str).tolist()
+        self.assertNotIn("000001", codes)  # 亏损仍排除
+        self.assertIn("000002", codes)     # PE60 <= 100 保留
+
     def test_screen_pledge_filter(self):
         """应正确过滤高质押股票"""
         data = {
@@ -347,6 +468,24 @@ class TestFundamentalScreener(unittest.TestCase):
 
         self.assertIn("亏损股", result["signals"])
         self.assertLess(result["score"], 0)
+
+    def test_score_pb_penalty_follows_config(self):
+        """PB偏高扣分阈值应跟随配置的 max_pb，而不是写死 5：
+        max_pb=6 时 PB 5.5 不应扣分；max_pb=5（默认）时 PB 5.5 应扣分"""
+        row = pd.Series({
+            "总市值": 5e11,
+            "市盈率": 10,
+            "市净率": 5.5,
+            "股息率": 3.0,
+            "所属行业": "广告包装"
+        })
+        config6 = self._build_config()
+        config6["valuation"]["max_pb"] = 6
+        result6 = FundamentalScreener(pd.DataFrame(), config6).score(row)
+        self.assertNotIn("PB偏高", result6["signals"])
+
+        result5 = FundamentalScreener(pd.DataFrame(), self._build_config()).score(row)
+        self.assertIn("PB偏高", result5["signals"])
 
     def test_score_high_pb_penalty(self):
         """高PB应扣分"""

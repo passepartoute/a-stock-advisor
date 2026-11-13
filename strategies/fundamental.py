@@ -43,6 +43,17 @@ class FundamentalScreener:
         self.pledge_threshold = self.pledge_cfg.get("threshold_pct", 30.0)
         self.pledge_high_risk = self.pledge_cfg.get("high_risk_pct", 50.0)
 
+        # 成长行业差异化估值阈值（2026-11-13：AI 主线被全局 PE≤50/PB≤5/股息≥0.5%
+        # 三件套整体封死在信号池外，与 AI 简报"成长风格占优"冲突）
+        # 只放宽估值硬阈值与市值上限；市值下限、亏损股排除、行业黑名单、
+        # 质押避雷、一票否决均不变。未配置 growth_override 时行为与旧版完全一致。
+        gv = self.valuation_cfg.get("growth_override", {}) or {}
+        self.growth_industries = gv.get("industries", [])
+        self.growth_max_pe = gv.get("max_pe") or 0
+        self.growth_max_pb = gv.get("max_pb") or 0
+        self.growth_min_dy = gv.get("min_dividend_yield")  # 0 表示不设下限
+        self.growth_max_cap = gv.get("max_cap") or 0       # 亿；0 表示不调整上限
+
         # 股权质押数据（外部注入）
         self.pledge_df = None
         # 记录被排除的高质押股票
@@ -88,6 +99,34 @@ class FundamentalScreener:
             return False
         sector = str(sector)
         return any(kw in sector for kw in keywords)
+
+    def _is_growth_industry(self, sector) -> bool:
+        """是否为配置了差异化估值阈值的成长行业（双向子串匹配，兼容
+        tushare 的'元器件'与东财的'电子元件'等不同行业命名）"""
+        if not self.growth_industries or pd.isna(sector):
+            return False
+        s = str(sector).strip()
+        if not s:
+            return False
+        return any(kw in s or s in kw for kw in self.growth_industries)
+
+    def _pe_limit(self, sector) -> float:
+        """PE 上限：成长行业用放宽阈值，其余用全局阈值（0=不限制）"""
+        if self.growth_max_pe and self._is_growth_industry(sector):
+            return self.growth_max_pe
+        return self.valuation_cfg.get("max_pe", 0)
+
+    def _pb_limit(self, sector) -> float:
+        """PB 上限：成长行业用放宽阈值，其余用全局阈值（0=不限制）"""
+        if self.growth_max_pb and self._is_growth_industry(sector):
+            return self.growth_max_pb
+        return self.valuation_cfg.get("max_pb", 0)
+
+    def _dy_limit(self, sector):
+        """股息率下限：成长行业可设为 0（不设下限），None 表示沿用全局"""
+        if self.growth_min_dy is not None and self._is_growth_industry(sector):
+            return self.growth_min_dy
+        return self.valuation_cfg.get("min_dividend_yield", 0)
 
     def screen(self, ai_signals: dict = None) -> pd.DataFrame:
         """基本面初筛：排除 + 硬条件过滤"""
@@ -145,35 +184,74 @@ class FundamentalScreener:
                   f"{len(preferred)}条白名单 + {len(excluded)}条黑名单行业过滤规则被静默跳过，"
                   f"推荐列表可能集中于个别行业（2026-11-04/06 事故模式）")
 
-        # 3. 市值过滤
+        # 3. 市值过滤（成长行业可放宽上限，如 balanced 2000亿 上限对
+        #    中芯国际/海光等主线龙头过紧；下限与绝对下限不变）
         if "总市值" in df.columns:
             cap_min = self.mc["min"] * 1e8
-            cap_max = self.mc["max"] * 1e8
             abs_min = self.absolute_min * 1e8
-            df = df[df["总市值"] >= abs_min].copy()
-            df = df[(df["总市值"] >= cap_min) & (df["总市值"] <= cap_max)].copy()
+            cap_max = self.mc["max"] * 1e8
+            if self.growth_max_cap and "所属行业" in df.columns:
+                cap_max_s = pd.Series(cap_max, index=df.index)
+                growth_mask = df["所属行业"].apply(self._is_growth_industry)
+                cap_max_s[growth_mask] = self.growth_max_cap * 1e8
+                df = df[(df["总市值"] >= cap_min)
+                        & (df["总市值"] <= cap_max_s)
+                        & (df["总市值"] >= abs_min)].copy()
+            else:
+                df = df[(df["总市值"] >= cap_min)
+                        & (df["总市值"] <= cap_max)].copy()
+                df = df[df["总市值"] >= abs_min].copy()
 
-        # 4. PE 过滤
+        # 4. PE 过滤（成长行业差异化阈值；亏损股排除规则不变）
         if "市盈率" in df.columns:
             df = df[df["市盈率"].notna()].copy()
             if self.valuation_cfg.get("exclude_negative_pe", True):
                 df = df[df["市盈率"] > 0].copy()
-            max_pe = self.valuation_cfg.get("max_pe", 0)
-            if max_pe > 0:
-                df = df[df["市盈率"] <= max_pe].copy()
+            if self.growth_max_pe and "所属行业" in df.columns:
+                keep = df.apply(
+                    lambda r: (r["市盈率"] <= self._pe_limit(r["所属行业"]))
+                    if self._pe_limit(r["所属行业"]) > 0 else True,
+                    axis=1)
+                df = df[keep].copy()
+            else:
+                max_pe = self.valuation_cfg.get("max_pe", 0)
+                if max_pe > 0:
+                    df = df[df["市盈率"] <= max_pe].copy()
 
-        # 5. PB 过滤
+        # 5. PB 过滤（成长行业差异化阈值）
         if "市净率" in df.columns:
             df = df[df["市净率"].notna()].copy()
-            max_pb = self.valuation_cfg.get("max_pb", 0)
-            if max_pb > 0:
-                df = df[df["市净率"] <= max_pb].copy()
+            if self.growth_max_pb and "所属行业" in df.columns:
+                keep = df.apply(
+                    lambda r: (r["市净率"] <= self._pb_limit(r["所属行业"]))
+                    if self._pb_limit(r["所属行业"]) > 0 else True,
+                    axis=1)
+                df = df[keep].copy()
+            else:
+                max_pb = self.valuation_cfg.get("max_pb", 0)
+                if max_pb > 0:
+                    df = df[df["市净率"] <= max_pb].copy()
 
-        # 6. 股息率过滤
+        # 6. 股息率过滤（成长行业可取消下限，如股息率 0 仍保留）
         if "股息率" in df.columns:
-            min_dy = self.valuation_cfg.get("min_dividend_yield", 0)
-            if min_dy > 0:
-                df = df[df["股息率"] >= min_dy].copy()
+            if self.growth_min_dy is not None and "所属行业" in df.columns:
+                keep = df.apply(
+                    lambda r: (r["股息率"] >= self._dy_limit(r["所属行业"]))
+                    if self._dy_limit(r["所属行业"]) > 0 else True,
+                    axis=1)
+                df = df[keep].copy()
+            else:
+                min_dy = self.valuation_cfg.get("min_dividend_yield", 0)
+                if min_dy > 0:
+                    df = df[df["股息率"] >= min_dy].copy()
+
+        # 6.5 成长行业差异化阈值生效提示（供 CI 日志审计）
+        if (self.growth_max_pe or self.growth_max_pb
+                or self.growth_min_dy is not None) and "所属行业" in df.columns:
+            n_growth = int(df["所属行业"].apply(self._is_growth_industry).sum())
+            print(f"     成长行业差异化估值: {n_growth}/{len(df)} 只按放宽阈值保留"
+                  f"(PE<={self.growth_max_pe or '-'}, PB<={self.growth_max_pb or '-'}, "
+                  f"股息>={self.growth_min_dy if self.growth_min_dy is not None else '-'})")
 
         # 7. 股权质押避雷过滤
         if self.pledge_enabled and self.pledge_df is not None and not self.pledge_df.empty:
@@ -303,7 +381,10 @@ class FundamentalScreener:
                 signals.append("PB低估值")
             elif pb < 2.5:
                 score += 0.1
-            elif pb > 5:
+            # 扣分阈值跟随生效的筛选上限（含成长行业差异化阈值），
+            # 与 screen() 的 PB 过滤单一来源，避免"过了筛选仍被扣分"
+            pb_limit = self._pb_limit(stock_row.get("所属行业", ""))
+            if pb_limit > 0 and pb > pb_limit:
                 score -= 0.15
                 signals.append("PB偏高")
 
