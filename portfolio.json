@@ -1,10 +1,10 @@
 {
  "version": 1,
  "initial_capital": 500000.0,
- "cash": 78179.72199999995,
+ "cash": 77310.92349999996,
  "created_at": "2026-10-31",
- "last_settled_date": "2026-11-12",
- "realized_pnl": 15708.37,
+ "last_settled_date": "2026-11-13",
+ "realized_pnl": 12044.08,
  "positions": {
   "600483": {
    "code": "600483",
@@ -15,8 +15,8 @@
    "buy_price": 10.72,
    "stop_loss_price": 10.27,
    "target_price": 11.45,
-   "highest_price": 11.08,
-   "last_close": 10.97,
+   "highest_price": 11.3,
+   "last_close": 11.25,
    "buy_fee": 14.954399999999998
   },
   "601528": {
@@ -29,7 +29,7 @@
    "stop_loss_price": 5.2,
    "target_price": 5.53,
    "highest_price": 5.52,
-   "last_close": 5.44,
+   "last_close": 5.47,
    "buy_fee": 15.2991
   },
   "603565": {
@@ -42,21 +42,8 @@
    "stop_loss_price": 12.01,
    "target_price": 13.7,
    "highest_price": 12.84,
-   "last_close": 12.25,
+   "last_close": 12.08,
    "buy_fee": 22.933349999999997
-  },
-  "601688": {
-   "code": "601688",
-   "name": "华泰证券",
-   "shares": 4300,
-   "cost_price": 17.78,
-   "buy_date": "2026-11-09",
-   "buy_price": 17.78,
-   "stop_loss_price": 16.95,
-   "target_price": 19.76,
-   "highest_price": 17.85,
-   "last_close": 17.11,
-   "buy_fee": 11.4681
   },
   "601077": {
    "code": "601077",
@@ -67,8 +54,34 @@
    "buy_price": 7.14,
    "stop_loss_price": 6.82,
    "target_price": 9.33,
-   "highest_price": 7.37,
-   "last_close": 7.21,
+   "highest_price": 7.38,
+   "last_close": 7.32,
+   "buy_fee": 5.0
+  },
+  "600267": {
+   "code": "600267",
+   "name": "海正药业",
+   "shares": 5500,
+   "cost_price": 13.31,
+   "buy_date": "2026-11-13",
+   "buy_price": 13.31,
+   "stop_loss_price": 12.67,
+   "target_price": 15.0,
+   "highest_price": 13.33,
+   "last_close": 12.87,
+   "buy_fee": 10.980749999999999
+  },
+  "000591": {
+   "code": "000591",
+   "name": "太阳能",
+   "shares": 100,
+   "cost_price": 4.49,
+   "buy_date": "2026-11-13",
+   "buy_price": 4.49,
+   "stop_loss_price": 4.47,
+   "target_price": 6.12,
+   "highest_price": 4.64,
+   "last_close": 4.46,
    "buy_fee": 5.0
   }
  },
@@ -338,6 +351,48 @@
    "reason": "挂单成交（触及储备缩量）",
    "pnl": null,
    "pnl_pct": null
+  },
+  {
+   "date": "2026-11-13",
+   "code": "601688",
+   "name": "华泰证券",
+   "side": "SELL",
+   "price": 16.95,
+   "shares": 4300,
+   "amount": 72885.0,
+   "commission": 10.932749999999999,
+   "stamp_tax": 72.885,
+   "reason": "止损",
+   "pnl": -3664.29,
+   "pnl_pct": -4.79
+  },
+  {
+   "date": "2026-11-13",
+   "code": "600267",
+   "name": "海正药业",
+   "side": "BUY",
+   "price": 13.31,
+   "shares": 5500,
+   "amount": 73205.0,
+   "commission": 10.980749999999999,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交（触及储备缩量）",
+   "pnl": null,
+   "pnl_pct": null
+  },
+  {
+   "date": "2026-11-13",
+   "code": "000591",
+   "name": "太阳能",
+   "side": "BUY",
+   "price": 4.49,
+   "shares": 100,
+   "amount": 449.0,
+   "commission": 5.0,
+   "stamp_tax": 0.0,
+   "reason": "挂单成交（触及储备缩量）",
+   "pnl": null,
+   "pnl_pct": null
   }
  ],
  "daily_snapshots": [
@@ -420,6 +475,14 @@
    "total_value": 514841.72,
    "daily_pnl": -1497.0,
    "benchmark_close": 3655.8295
+  },
+  {
+   "date": "2026-11-13",
+   "cash": 77310.92,
+   "market_value": 435505.0,
+   "total_value": 512815.92,
+   "daily_pnl": -2025.8,
+   "benchmark_close": 3634.353
   }
  ]
 }
