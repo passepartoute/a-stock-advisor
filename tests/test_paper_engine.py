@@ -147,7 +147,9 @@ class TestSharesAndFees(unittest.TestCase):
                                       close=10.0, pre_close=10.0)}
         p = make_portfolio(capital=49950.0)
         # budget = 49950*0.2 = 9990 -> floor(9990/10/100)*100 = 900 股
-        result = make_engine(bars).settle(p, DATE, [make_order()])
+        # min_trade_amount=0 关闭金额门槛（本测夹具成交 9000 元 < 默认 1 万）
+        result = make_engine(bars, min_trade_amount=0).settle(
+            p, DATE, [make_order()])
         t = result["trades"][0]
         self.assertEqual(t["shares"], 900)
         self.assertEqual(t["amount"], 9000.0)
@@ -166,10 +168,11 @@ class TestSharesAndFees(unittest.TestCase):
         }
         # 初始 10000，现金 3000、现金储备 15%（floor=1500）-> 可用 1500：
         # 单 budget 5000（400 股）超可用 -> 缩到 100 股(1005+5=1010)成交
+        # 注：min_trade_amount=0 关闭单笔金额门槛，本测只验证储备缩量逻辑
         p = make_portfolio(capital=10000.0, cash=3000.0)
         orders = [make_order(position_pct=50),
                   make_order(code="000001", name="平安银行", position_pct=15)]
-        result = make_engine(bars).settle(p, DATE, orders)
+        result = make_engine(bars, min_trade_amount=0).settle(p, DATE, orders)
         self.assertEqual(len(result["trades"]), 1)
         t = result["trades"][0]
         self.assertEqual(t["code"], "600519")
@@ -251,8 +254,10 @@ class TestPortfolioConstraints(unittest.TestCase):
                                       close=10.0, pre_close=10.0)}
         # 净值 100000，储备 15% -> 下限 15000；现金 20000 -> 可用 5000
         # budget 10% = 10000（1000 股）；缩到 500 股时 5000+5 超可用 -> 退到 400 股
+        # min_trade_amount=0 关闭金额门槛（本测夹具成交 4000 元 < 默认 1 万）
         p = make_portfolio(capital=100000.0, cash=20000.0)
-        result = make_engine(bars, cash_reserve_pct=15.0).settle(
+        result = make_engine(bars, cash_reserve_pct=15.0,
+                             min_trade_amount=0).settle(
             p, DATE, [make_order(position_pct=10)])
         self.assertEqual(len(result["trades"]), 1)
         t = result["trades"][0]
@@ -267,10 +272,65 @@ class TestPortfolioConstraints(unittest.TestCase):
         bars = {("600519", DATE): Bar(open=10.0, high=10.2, low=9.95,
                                       close=10.0, pre_close=10.0)}
         p = make_portfolio(capital=100000.0, cash=20000.0)
-        result = make_engine(bars, cash_reserve_pct=15.0).settle(
+        # min_trade_amount=0 关闭金额门槛（本测夹具成交 4000 元 < 默认 1 万）
+        result = make_engine(bars, cash_reserve_pct=15.0,
+                             min_trade_amount=0).settle(
             p, DATE, [make_order(position_pct=4)])
         self.assertEqual(len(result["trades"]), 1)
         self.assertEqual(result["trades"][0]["shares"], 400)
+
+
+class TestMinTradeAmount(unittest.TestCase):
+    """单笔金额门槛：成交金额低于 min_trade_amount（默认1万）拒止碎单
+    （2026-11-16 需求：11-13 太阳能被储备线缩成 100股/449元 的碎单仍成交）"""
+
+    def _bars10(self):
+        return {("600519", DATE): Bar(open=10.0, high=10.1, low=9.9,
+                                      close=10.0, pre_close=10.0)}
+
+    def test_fill_below_10000_rejected_as_small_lot(self):
+        # 大账户 + 大单预算，但储备线把成交缩到 100 股(1000元) -> 拒止
+        bars = {("600519", DATE): Bar(open=10.05, high=10.2, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        # 现金 20 万、储备线 15%(floor=15000) -> 可用 5000；
+        # budget 20%(40000) 缩到 500 -> 100 股(1005元) < 1万门槛
+        p = make_portfolio(capital=100000.0, cash=20000.0)
+        result = make_engine(bars).settle(p, DATE, [make_order(position_pct=20)])
+        self.assertEqual(result["trades"], [])
+        self.assertIn("10000", result["unfilled"][0]["reason"])
+        self.assertIn("金额", result["unfilled"][0]["reason"])
+        self.assertNotIn("600519", p.positions)
+
+    def test_normal_fill_above_10000_passes(self):
+        # 正常成交 1000 股 * 10 元 = 10000 元，正好过线 -> 成交
+        p = make_portfolio()
+        result = make_engine(self._bars10()).settle(
+            p, DATE, [make_order(position_pct=10)])
+        self.assertEqual(len(result["trades"]), 1)
+        self.assertEqual(result["trades"][0]["amount"], 10000.0)
+
+    def test_threshold_configurable(self):
+        # 阈值调到 20000：1 万元的成交也被拒
+        p = make_portfolio()
+        result = make_engine(self._bars10(), min_trade_amount=20000).settle(
+            p, DATE, [make_order(position_pct=10)])  # 成交 10000 元 < 20000
+        self.assertEqual(result["trades"], [])
+        self.assertIn("20000", result["unfilled"][0]["reason"])
+
+    def test_low_account_cash_still_trades_if_fill_big(self):
+        # 账户现金不高（如 5 万）但单笔成交 1 万以上 -> 照常交易。
+        # 门槛看的是单笔金额，不是账户现金（与储备线分工）
+        p = make_portfolio(capital=100000.0, cash=50000.0)
+        result = make_engine(self._bars10()).settle(p, DATE, [make_order()])
+        self.assertEqual(len(result["trades"]), 1)
+
+    def test_from_settings_reads_min_trade_amount(self):
+        cfg = SettleConfig.from_settings({
+            "paper_trading": {"min_trade_amount": 30000.0}
+        })
+        self.assertEqual(cfg.min_trade_amount, 30000.0)
+        self.assertEqual(SettleConfig.from_settings({}).min_trade_amount,
+                         10000.0)
 
 
 class TestSellRules(unittest.TestCase):
@@ -339,7 +399,8 @@ class TestSellRules(unittest.TestCase):
         bars = {("600519", DATE): Bar(open=9.8, high=9.9, low=9.4,
                                       close=9.6, pre_close=10.5)}
         p = make_portfolio(positions=[pos])
-        result = make_engine(bars).settle(p, DATE, [])
+        # min_trade_amount=0 关闭碎仓清理（本测夹具市值 9600 元 < 默认 1 万）
+        result = make_engine(bars, min_trade_amount=0).settle(p, DATE, [])
         # trail=9.5 但 <= cost 不触发移动止盈；low=9.4 > stop=9.0 不触发止损
         self.assertEqual(result["trades"], [])
 
@@ -381,13 +442,84 @@ class TestSellRules(unittest.TestCase):
         bars = {("600519", DATE): Bar(open=9.6, high=9.7, low=9.55,
                                       close=9.65, pre_close=9.5)}
         p = make_portfolio(positions=[pos])
-        result = make_engine(bars).settle(p, DATE, [])
+        # min_trade_amount=0 关闭碎仓清理（本测夹具市值 9650 元 < 默认 1 万）
+        result = make_engine(bars, min_trade_amount=0).settle(p, DATE, [])
         self.assertEqual(result["trades"], [],
                          "除权缺口不得假触发止损")
         adj = p.positions["600519"]
         self.assertAlmostEqual(adj["stop_loss_price"], 9.12, places=2)
         self.assertAlmostEqual(adj["cost_price"], 9.50, places=2)
         self.assertAlmostEqual(adj["highest_price"], 9.97, places=2)  # 10.5*0.95=9.975 浮点舍入为 9.97
+
+
+class TestSmallPositionCleanup(unittest.TestCase):
+    """碎仓清理：市值低于 min_trade_amount（默认1万）的持仓按收盘卖出
+    （2026-11-16 需求：11-13 买入的 100股/449元 太阳能不清理会永久留存）"""
+
+    def test_tiny_position_sold_at_close(self):
+        # 100 股 * 10 元 = 1000 元 < 1 万，无常规卖出触发 -> 收盘清理
+        pos = make_position(shares=100, cost=10.0, highest=10.0)
+        bars = {("600519", DATE): Bar(open=10.0, high=10.1, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        p = make_portfolio(cash=0.0, positions=[pos])
+        result = make_engine(bars).settle(p, DATE, [])
+        self.assertEqual(len(result["trades"]), 1)
+        t = result["trades"][0]
+        self.assertEqual(t["side"], "SELL")
+        self.assertEqual(t["price"], 10.0)  # 收盘价成交
+        self.assertIn("碎仓", t["reason"])
+        self.assertIn("10000", t["reason"])
+        self.assertNotIn("600519", p.positions)
+
+    def test_position_at_threshold_kept(self):
+        # 1000 股 * 10 元 = 10000 元，正好过线且无触发 -> 保留
+        pos = make_position(shares=1000, cost=10.0, highest=10.0)
+        bars = {("600519", DATE): Bar(open=10.0, high=10.1, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        p = make_portfolio(positions=[pos])
+        result = make_engine(bars).settle(p, DATE, [])
+        self.assertEqual(result["trades"], [])
+        self.assertIn("600519", p.positions)
+
+    def test_tiny_position_one_way_limit_down_kept(self):
+        # 一字跌停卖不掉：碎仓也清不了（与止损同一约束）
+        pos = make_position(shares=100, cost=10.0, highest=10.0)
+        bars = {("600519", DATE): Bar(open=9.0, high=9.0, low=9.0,
+                                      close=9.0, pre_close=10.0)}
+        p = make_portfolio(cash=0.0, positions=[pos])
+        result = make_engine(bars).settle(p, DATE, [])
+        self.assertEqual(result["trades"], [])
+        self.assertIn("600519", p.positions)
+
+    def test_tiny_position_suspended_kept(self):
+        # 停牌无行情：无法成交，保留
+        pos = make_position(shares=100, cost=10.0, highest=10.0)
+        p = make_portfolio(cash=0.0, positions=[pos])
+        result = make_engine(bars={}).settle(p, DATE, [])
+        self.assertEqual(result["trades"], [])
+        self.assertIn("600519", p.positions)
+
+    def test_cleanup_threshold_configurable(self):
+        # 阈值调到 2000：1000 元碎仓低于线 -> 清理（可调即生效）
+        pos = make_position(shares=100, cost=10.0, highest=10.0)
+        bars = {("600519", DATE): Bar(open=10.0, high=10.1, low=9.95,
+                                      close=10.0, pre_close=10.0)}
+        p = make_portfolio(cash=0.0, positions=[pos])
+        result = make_engine(bars, min_trade_amount=2000).settle(p, DATE, [])
+        self.assertEqual(len(result["trades"]), 1)
+        self.assertIn("2000", result["trades"][0]["reason"])
+
+    def test_stop_loss_takes_precedence_over_cleanup(self):
+        # 同日既破止损又是碎仓：按止损价走（常规规则优先，不得重复卖出）
+        # last_close=10.0 与 pre_close 一致，避免触发除权锚点调整
+        pos = make_position(shares=100, cost=10.0, stop=9.5, highest=10.0,
+                            last_close=10.0)
+        bars = {("600519", DATE): Bar(open=9.5, high=9.6, low=9.4,
+                                      close=9.45, pre_close=10.0)}
+        p = make_portfolio(cash=0.0, positions=[pos])
+        result = make_engine(bars).settle(p, DATE, [])
+        self.assertEqual(len(result["trades"]), 1)
+        self.assertEqual(result["trades"][0]["reason"], "止损")
 
 
 class TestSuspensionAndIdempotency(unittest.TestCase):

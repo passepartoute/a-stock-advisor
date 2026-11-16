@@ -41,6 +41,7 @@ class SettleConfig:
     gap_up_reduce_pct: float = 1.0     # 高开减仓阈值（%）
     max_holdings: int = 10             # 最大持仓数（与 position_management 同源）
     cash_reserve_pct: float = 15.0     # 现金储备下限（占昨日净值 %，与 position_management 同源）
+    min_trade_amount: float = 10000.0  # 单笔金额门槛（元）：缩量后的成交金额低于此值拒止碎单
     buyable_advices: tuple = ("强烈关注", "关注")  # 允许买入的建议级别
 
     @classmethod
@@ -66,6 +67,7 @@ class SettleConfig:
             gap_up_reduce_pct=pm.get("gap_up_reduce_pct", 1.0),
             max_holdings=pos.get("max_holdings", 10),
             cash_reserve_pct=pos.get("cash_reserve", 15.0),
+            min_trade_amount=pt.get("min_trade_amount", 10000.0),
             buyable_advices=tuple(pt.get("buyable_advices", ["强烈关注", "关注"])),
         )
 
@@ -163,6 +165,19 @@ class SettleEngine:
                 sell_price = max(self._slip_sell(sell_price), limit_down)
                 self._do_sell(portfolio, pos, date, sell_price, reason,
                               day_trades)
+                continue
+
+            # 碎仓清理：市值低于 min_trade_amount 的持仓按收盘价卖出
+            # （2026-11-16 规则。防止买入端金额门槛拦住的碎单若已成交
+            # （如 100股/449元 太阳能）会永久留存。一字跌停/停牌卖不掉
+            # 时保留，与止损同一约束；常规卖出规则优先于清理。）
+            if (not one_way_down
+                    and pos["shares"] * bar.close < self.cfg.min_trade_amount):
+                sell_price = max(self._slip_sell(bar.close), limit_down)
+                self._do_sell(
+                    portfolio, pos, date, sell_price,
+                    f"碎仓清理（低于{self.cfg.min_trade_amount:g}元）",
+                    day_trades)
                 continue
 
             # 未卖出：更新持仓期最高价与最新收盘
@@ -288,6 +303,13 @@ class SettleEngine:
                 continue
             if shares < budget_shares:
                 reason = f"{reason}（触及储备缩量）"
+            # 单笔金额门槛：缩量后的成交金额低于阈值时拒止碎单（2026-11-16 规则）。
+            # 针对储备线把大单缩成几万元以下碎单仍成交的场景（如 11-13 太阳能
+            # 缩成 100股/449元）；储备缩量本身保留，只是缩得太小就不做这笔。
+            if amount < self.cfg.min_trade_amount:
+                unfilled.append(self._unfill(
+                    order, f"金额不足（低于{self.cfg.min_trade_amount:g}元）"))
+                continue
 
             portfolio.cash -= amount + fee
             portfolio.positions[code] = {
